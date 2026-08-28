@@ -57,6 +57,8 @@ export const events = {
   trackerAttention: 'tracker:attention',
   /** A torrent arrived from a file association or a magnet link. */
   torrentAdded: 'torrent:added',
+  /** A watch-history row changed, e.g. its artwork arrived. */
+  historyUpdated: 'history:updated',
 } as const
 
 export function onProgress(cb: (p: TorrentProgress[]) => void): Promise<UnlistenFn> {
@@ -79,6 +81,10 @@ export function onUpdateCheckState(cb: (s: string) => void): Promise<UnlistenFn>
 
 export function onTrackerAuth(cb: (loggedIn: boolean) => void): Promise<UnlistenFn> {
   return listen<boolean>(events.trackerAuth, (e) => cb(e.payload))
+}
+
+export function onHistoryUpdated(cb: () => void): Promise<UnlistenFn> {
+  return listen(events.historyUpdated, () => cb())
 }
 
 export function onTorrentAdded(cb: (name: string) => void): Promise<UnlistenFn> {

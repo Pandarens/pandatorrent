@@ -198,6 +198,7 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
     let player = player::Player::new(app.clone());
 
     Ok(Arc::new(AppState {
+        app_handle: app.clone(),
         db,
         config: RwLock::new(cfg),
         config_path,

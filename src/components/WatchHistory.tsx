@@ -5,7 +5,7 @@
 
 import { useEffect, useState } from 'react'
 
-import { history as historyApi, player as playerApi } from '../lib/api'
+import { history as historyApi, onHistoryUpdated, player as playerApi } from '../lib/api'
 import { formatDateTime } from '../lib/format'
 import { useStore } from '../lib/store'
 import type { WatchHistoryItem } from '../lib/types'
@@ -29,6 +29,12 @@ export function WatchHistory() {
 
   useEffect(() => {
     void load()
+    // Artwork is fetched in the background after a film starts, so the list
+    // refreshes itself once the picture lands.
+    const un = onHistoryUpdated(() => void load())
+    return () => {
+      void un.then((f) => f())
+    }
   }, [])
 
   async function again(item: WatchHistoryItem) {

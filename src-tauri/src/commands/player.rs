@@ -8,7 +8,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use tauri::State;
+use tauri::{Emitter, State};
 
 use crate::db::models::{TorrentSource, WatchHistoryItem};
 use crate::engine::{AddOptions, AddSource, TorrentFileEntry};
@@ -183,14 +183,18 @@ pub async fn player_play(
     remember_and_prefetch(&state, &info_hash, files.iter().map(|f| f.index).collect());
 
     let record = state.db.get_torrent(&info_hash)?;
+    let topic_id = record.as_ref().and_then(|r| r.topic_id);
     state.db.history_add(
-        record.as_ref().and_then(|r| r.topic_id),
+        topic_id,
         Some(&info_hash),
         record.as_ref().map(|r| r.name.as_str()).unwrap_or(&title),
         Some(&title),
-        None,
+        topic_id.and_then(|id| cached_preview(&state, id)).as_deref(),
         false,
     )?;
+    if let Some(id) = topic_id {
+        ensure_history_artwork(&state, id);
+    }
     Ok(())
 }
 
@@ -289,9 +293,10 @@ pub async fn player_watch_topic(
         Some(&added.info_hash),
         &display,
         files.first().map(|f| f.name.as_str()),
-        None,
+        cached_preview(&state, topic_id).as_deref(),
         true,
     )?;
+    ensure_history_artwork(&state, topic_id);
     Ok(())
 }
 
@@ -403,6 +408,39 @@ async fn drain_file(state: &AppState, info_hash: &str, file_id: usize) -> AppRes
             Err(e) => return Err(AppError::msg(format!("чтение прервано: {e}"))),
         }
     }
+}
+
+/// Artwork already cached for a topic, if the search grid has seen it.
+fn cached_preview(state: &AppState, topic_id: i64) -> Option<String> {
+    // Two layers of Option: the outer says whether the topic was ever looked
+    // at, the inner whether it turned out to have a picture.
+    state.db.get_topic_preview(topic_id).ok().flatten().flatten()
+}
+
+/// Makes sure a history entry ends up with a picture.
+///
+/// Nothing here is worth failing playback over: if the topic page cannot be
+/// read, the entry simply keeps its placeholder.
+fn ensure_history_artwork(state: &Arc<AppState>, topic_id: i64) {
+    if cached_preview(state, topic_id).is_some() {
+        return;
+    }
+    let state = state.clone();
+    tauri::async_runtime::spawn(async move {
+        let image = match state.rutracker.topic(topic_id).await {
+            Ok(topic) => topic.images.into_iter().next(),
+            Err(e) => {
+                tracing::debug!("no artwork for topic {topic_id}: {e}");
+                return;
+            }
+        };
+        // Remembered either way, so a topic without pictures is not re-fetched.
+        let _ = state.db.set_topic_preview(topic_id, image.as_deref());
+        if let Some(url) = image {
+            let _ = state.db.history_set_image(topic_id, &url);
+            let _ = state.app_handle.emit(crate::state::events::HISTORY_UPDATED, ());
+        }
+    });
 }
 
 fn ensure_player_available(state: &AppState) -> AppResult<()> {

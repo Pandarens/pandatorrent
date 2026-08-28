@@ -77,7 +77,7 @@ export function Sidebar({
         })}
       </nav>
 
-      <div className="sidebar-section">Установлено ({library.length})</div>
+      <div className="sidebar-section">Загружено ({library.length})</div>
 
       {library.length > 8 && (
         <div style={{ padding: '0 14px 8px' }}>

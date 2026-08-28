@@ -433,6 +433,21 @@ impl Db {
         Ok(rows.collect::<Result<_, _>>()?)
     }
 
+    /// Fills in artwork for rows that were written before it was known.
+    ///
+    /// A film is recorded in the history the moment it starts playing, which is
+    /// usually before its topic page has been fetched — so the picture arrives
+    /// a little later and is patched in here.
+    pub fn history_set_image(&self, topic_id: i64, image_url: &str) -> AppResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE watch_history SET image_url = ?2
+             WHERE topic_id = ?1 AND (image_url IS NULL OR image_url = '')",
+            params![topic_id, image_url],
+        )?;
+        Ok(())
+    }
+
     pub fn history_remove(&self, id: i64) -> AppResult<()> {
         let conn = self.conn.lock();
         conn.execute("DELETE FROM watch_history WHERE id = ?1", params![id])?;

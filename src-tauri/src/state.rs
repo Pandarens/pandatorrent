@@ -23,9 +23,13 @@ pub mod events {
     pub const UPDATE_CHECK_STATE: &str = "updates:check-state";
     /// A torrent arrived from outside the UI — a file association or a magnet.
     pub const TORRENT_ADDED: &str = "torrent:added";
+    /// A watch-history row changed, e.g. its artwork finally arrived.
+    pub const HISTORY_UPDATED: &str = "history:updated";
 }
 
 pub struct AppState {
+    /// Kept so background tasks can emit events without a command's handle.
+    pub app_handle: tauri::AppHandle,
     pub db: Db,
     pub config: RwLock<AppConfig>,
     pub config_path: PathBuf,
