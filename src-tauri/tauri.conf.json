@@ -55,6 +55,10 @@
           "Russian",
           "English"
         ]
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
       }
     },
     "resources": {
