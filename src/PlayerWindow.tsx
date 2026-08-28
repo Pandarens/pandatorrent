@@ -43,6 +43,7 @@ export function PlayerWindow() {
   const [state, setState] = useState<Playback | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [active, setActive] = useState(true)
+  const [hovering, setHovering] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [onTop, setOnTop] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -193,9 +194,14 @@ export function PlayerWindow() {
     await settingsApi.set(next).catch(() => {})
   }
 
+  // Hiding the controls out from under a cursor that is resting on a button is
+  // the one case where the idle timer is wrong; the same goes for a paused
+  // film, where the controls are exactly what the viewer is looking at.
+  const visible = active || hovering || isPaused
+
   return (
     <div
-      className={active ? 'pw' : 'pw idle'}
+      className={visible ? 'pw' : 'pw idle'}
       onDoubleClick={() => void toggleFullscreen()}
       // The wheel is the natural way to change volume over a video.
       onWheel={(e) => {
@@ -221,7 +227,11 @@ export function PlayerWindow() {
         </>
       )}
 
-      <div className="pw-top">
+      <div
+        className="pw-top"
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+      >
         <div
           className="pw-drag"
           onMouseDown={(e) => {
@@ -293,7 +303,11 @@ export function PlayerWindow() {
       )}
       {error && <div className="pw-center pw-error">{error}</div>}
 
-      <div className="pw-bottom">
+      <div
+        className="pw-bottom"
+        onMouseEnter={() => setHovering(true)}
+        onMouseLeave={() => setHovering(false)}
+      >
         <div className="pw-seek">
           <span className="pw-time">{clock(position)}</span>
           <div className="pw-bar">
