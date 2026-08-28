@@ -1,0 +1,57 @@
+name: Release
+
+# Publishes a Windows build whenever a version tag is pushed:
+#
+#   git tag v0.1.1 && git push origin v0.1.1
+#
+# The job signs the artifacts and uploads `latest.json` next to them, which is
+# the file the app polls to discover new versions.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      # tauri-action creates the release and uploads the artifacts.
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      # libmpv is not committed — it is ~115 MB — so the build fetches it.
+      - name: Fetch libmpv
+        run: npm run fetch:mpv
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Without these the update artifacts are unsigned and the app will
+          # refuse to install them.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Panda Torrent ${{ github.ref_name }}'
+          releaseBody: 'Что нового в этой версии.'
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true

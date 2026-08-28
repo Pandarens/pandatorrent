@@ -1,0 +1,23 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "tracker-worker",
+  "description": "Lets the hidden RuTracker worker webview report page state and fetch results back to the app. Scoped to the tracker's own origins and to exactly two commands, neither of which can read the filesystem or start a download.",
+  "windows": [
+    "rt-worker"
+  ],
+  "remote": {
+    "urls": [
+      "https://rutracker.org/*",
+      "https://*.rutracker.org/*",
+      "https://rutracker.net/*",
+      "https://*.rutracker.net/*",
+      "https://rutracker.nl/*",
+      "https://*.rutracker.nl/*",
+      "https://rutracker.me/*",
+      "https://*.rutracker.me/*"
+    ]
+  },
+  "permissions": [
+    "tracker-worker-report"
+  ]
+}

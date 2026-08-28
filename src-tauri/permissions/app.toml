@@ -1,0 +1,80 @@
+# Application-level ACL.
+#
+# Declaring any application permission switches Tauri from "all app commands are
+# allowed everywhere" to explicit grants. That matters here because the hidden
+# RuTracker worker window loads a third-party site and is given IPC access: with
+# no ACL it could invoke every command in the app, launching executables
+# included. With this file it can reach exactly two reporting callbacks.
+
+[[permission]]
+identifier = "app-ui"
+description = "Commands the application's own UI uses. Granted only to the local main window."
+commands.allow = [
+  "torrents_list",
+  "torrents_progress",
+  "torrent_details",
+  "torrent_add_url",
+  "torrent_add_file",
+  "torrent_pause",
+  "torrent_resume",
+  "torrent_remove",
+  "torrent_set_files",
+  "torrent_open_folder",
+  "rutracker_status",
+  "rutracker_verify",
+  "rutracker_open_login",
+  "rutracker_hide_login",
+  "rutracker_selftest",
+  "rutracker_logout",
+  "rutracker_search",
+  "rutracker_topic",
+  "rutracker_catalog",
+  "rutracker_all_forums",
+  "home_new_releases",
+  "rutracker_topic_preview",
+  "rutracker_download",
+  "rutracker_track_existing",
+  "library_list",
+  "library_add",
+  "library_scan_executables",
+  "library_set_exe",
+  "library_set_title",
+  "library_set_flag",
+  "library_launch",
+  "library_open_folder",
+  "library_fetch_cover",
+  "wishlist_list",
+  "wishlist_add",
+  "wishlist_remove",
+  "updates_list",
+  "updates_pending_count",
+  "updates_check_now",
+  "updates_apply",
+  "updates_dismiss",
+  "updates_set_topic_enabled",
+  "updates_tracked_topics",
+  "settings_get",
+  "settings_set",
+  "settings_mirrors",
+  "app_info",
+  "app_update_check",
+  "app_update_install",
+  "player_status",
+  "player_video_files",
+  "player_play",
+  "player_stop",
+  "player_command",
+  "player_watch_topic",
+  "player_playback",
+  "history_list",
+  "history_remove",
+  "history_clear"
+]
+
+[[permission]]
+identifier = "tracker-worker-report"
+description = "The two callbacks the RuTracker worker page uses to hand page state and fetch results back to the app. Neither touches the filesystem, the torrent engine, or the library."
+commands.allow = [
+  "tracker_page_state",
+  "tracker_job_result"
+]
