@@ -394,6 +394,8 @@ export interface AppUpdate {
   version: string | null
   notes: string | null
   publishedAt: string | null
+  /** Explains an inconclusive check, e.g. nothing published yet. */
+  message: string | null
 }
 
 export interface AppInfo {

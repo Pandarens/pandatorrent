@@ -615,9 +615,10 @@ export function SettingsView() {
             {updateBusy && updateProgress == null ? <Spinner /> : '⟳'} Проверить обновления
           </button>
 
-          {update && !update.available && (
+          {update && !update.available && !update.message && (
             <span className="tag accent">Установлена последняя версия {update.currentVersion}</span>
           )}
+          {update?.message && <span className="tag">{update.message}</span>}
           {update?.available && (
             <span className="tag warn">Доступна версия {update.version}</span>
           )}

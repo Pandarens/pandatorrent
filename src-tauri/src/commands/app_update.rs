@@ -27,6 +27,8 @@ pub struct AppUpdate {
     /// Release notes, as written on the GitHub release.
     pub notes: Option<String>,
     pub published_at: Option<String>,
+    /// Explains an inconclusive check, e.g. nothing published yet.
+    pub message: Option<String>,
 }
 
 /// Asks GitHub whether a newer release exists.
@@ -45,6 +47,7 @@ pub async fn app_update_check(app: AppHandle) -> AppResult<AppUpdate> {
             version: Some(update.version.clone()),
             notes: update.body.clone(),
             published_at: update.date.map(|d| d.to_string()),
+            message: None,
         }),
         Ok(None) => Ok(AppUpdate {
             available: false,
@@ -52,11 +55,33 @@ pub async fn app_update_check(app: AppHandle) -> AppResult<AppUpdate> {
             version: None,
             notes: None,
             published_at: None,
+            message: None,
+        }),
+        // A repository with no releases yet answers 404 for `latest.json`. That
+        // is not a failure worth alarming anyone with — there is simply nothing
+        // to update to.
+        Err(e) if is_nothing_published(&e) => Ok(AppUpdate {
+            available: false,
+            current_version: current,
+            version: None,
+            notes: None,
+            published_at: None,
+            message: Some(
+                "Релизы ещё не опубликованы — обновляться пока не на что".to_string(),
+            ),
         }),
         Err(e) => Err(AppError::msg(format!(
             "не удалось проверить обновления: {e}"
         ))),
     }
+}
+
+/// Tells "the release feed is missing" apart from a real network failure.
+fn is_nothing_published(error: &tauri_plugin_updater::Error) -> bool {
+    let text = error.to_string();
+    text.contains("Could not fetch a valid release JSON")
+        || text.contains("404")
+        || text.contains("Not Found")
 }
 
 /// Downloads and installs the update, then restarts the app.
