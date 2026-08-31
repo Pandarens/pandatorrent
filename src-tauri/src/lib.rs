@@ -29,6 +29,11 @@ use trackers::rutracker::RutrackerClient;
 /// How often live download stats are pushed to the UI.
 const PROGRESS_INTERVAL: Duration = Duration::from_secs(1);
 
+/// How often to look when there is nothing to watch — the window is away in
+/// the tray, or every torrent is just seeding. A second-by-second update costs
+/// a redraw of the whole list, and in the tray nobody sees it at all.
+const IDLE_PROGRESS_INTERVAL: Duration = Duration::from_secs(5);
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -275,6 +280,19 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
 }
 
 /// Pushes live stats to the UI and turns "finished" into a one-shot event.
+/// Whether the main window is actually in front of someone.
+///
+/// Hidden in the tray or minimised, a pushed update costs a full redraw that
+/// nobody sees — which is most of what this application does with its day.
+fn main_window_is_watched(app: &AppHandle) -> bool {
+    let Some(window) = app.get_webview_window("main") else {
+        return false;
+    };
+    let visible = window.is_visible().unwrap_or(true);
+    let minimised = window.is_minimized().unwrap_or(false);
+    visible && !minimised
+}
+
 fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         // Torrents already complete at startup must not fire a notification,
@@ -290,14 +308,17 @@ fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
             })
             .unwrap_or_default();
 
+        let mut delay = PROGRESS_INTERVAL;
+        let mut was_watched = true;
+
         loop {
-            tokio::time::sleep(PROGRESS_INTERVAL).await;
+            tokio::time::sleep(delay).await;
 
+            let watched = main_window_is_watched(&app);
             let progress = state.engine.progress_all();
-            if progress.is_empty() {
-                continue;
-            }
 
+            // Completion is noticed and recorded whether or not anyone is
+            // looking: the notification is the point of it.
             for p in &progress {
                 let hash = p.info_hash.to_uppercase();
                 if !p.finished || announced.contains(&hash) {
@@ -308,7 +329,19 @@ fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
                 let _ = app.emit(events::TORRENT_COMPLETED, p);
             }
 
-            let _ = app.emit(events::PROGRESS, &progress);
+            // Coming back from the tray gets an immediate update rather than
+            // showing figures up to five seconds stale.
+            if watched && !progress.is_empty() {
+                let _ = app.emit(events::PROGRESS, &progress);
+            }
+
+            let moving = progress.iter().any(|p| !p.finished || p.download_speed_bps > 0);
+            delay = if watched && (moving || !was_watched) {
+                PROGRESS_INTERVAL
+            } else {
+                IDLE_PROGRESS_INTERVAL
+            };
+            was_watched = watched;
         }
     });
 }

@@ -406,8 +406,23 @@ impl TrackerBrowser {
 
         loop {
             {
-                let state = self.state.read();
-                if !state.url.is_empty() && !state.challenged {
+                let cleared = {
+                    let state = self.state.read();
+                    !state.url.is_empty() && !state.challenged
+                };
+                if cleared {
+                    // Cloudflare usually lets us through on its own a moment
+                    // after asking. When that happens the window we put on
+                    // screen is no longer wanted — and leaving the flag set
+                    // kept it open for the rest of the session, running the
+                    // forum'''s scripts for nobody to see.
+                    //
+                    // Only a window this call opened is taken back: one the
+                    // user opened themselves, to log in, is left alone.
+                    if asked_for_help {
+                        *self.interactive.write() = false;
+                        let _ = window.hide();
+                    }
                     return Ok(window);
                 }
             }
