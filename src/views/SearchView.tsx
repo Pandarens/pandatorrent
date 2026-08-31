@@ -214,7 +214,7 @@ export function SearchView({ onOpenLibrary }: { onOpenLibrary: (hash: string) =>
         <div className="search-results">
           {!result && !busy && (
             <>
-              <NewReleases onOpenGame={onOpenLibrary} />
+              <NewReleases onOpenGame={onOpenLibrary} onOpenSection={pickForum} />
               <Empty
                 icon="🔍"
                 title="Введите запрос или откройте каталог"

@@ -9,6 +9,7 @@ import { tracker, wishlist as wishlistApi } from '../lib/api'
 import { formatBytes } from '../lib/format'
 import { useStore } from '../lib/store'
 import type { WishlistItem } from '../lib/types'
+import { ScrollStrip } from './ScrollStrip'
 import { Spinner } from './ui'
 
 export function Wishlist({ onOpenGame }: { onOpenGame: (infoHash: string) => void }) {
@@ -63,7 +64,7 @@ export function Wishlist({ onOpenGame }: { onOpenGame: (infoHash: string) => voi
         <span className="page-sub">{items.length}</span>
       </div>
 
-      <div className="strip">
+      <ScrollStrip>
         {items.map((item) => (
           <div className="result-card" key={item.topicId}>
             <div className="result-art">
@@ -97,7 +98,7 @@ export function Wishlist({ onOpenGame }: { onOpenGame: (infoHash: string) => voi
             </div>
           </div>
         ))}
-      </div>
+      </ScrollStrip>
     </div>
   )
 }

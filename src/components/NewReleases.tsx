@@ -10,13 +10,22 @@ import { useEffect, useState } from 'react'
 
 import { tracker } from '../lib/api'
 import { useStore } from '../lib/store'
+import type { BrowseTarget } from '../lib/browse'
 import type { NewReleaseSection } from '../lib/types'
 import { ResultCard, useTrackerDownload } from './ResultCard'
+import { ScrollStrip } from './ScrollStrip'
 import { TopicPreviewModal } from './TopicPreviewModal'
 import { TrackerLogin } from './TrackerLogin'
 import { Spinner } from './ui'
 
-export function NewReleases({ onOpenGame }: { onOpenGame: (infoHash: string) => void }) {
+export function NewReleases({
+  onOpenGame,
+  onOpenSection,
+}: {
+  onOpenGame: (infoHash: string) => void
+  /** Browse the whole forum a strip is a window onto. */
+  onOpenSection?: (target: BrowseTarget) => void
+}) {
   const { config, reportError } = useStore()
 
   const [sections, setSections] = useState<NewReleaseSection[] | null>(null)
@@ -75,6 +84,21 @@ export function NewReleases({ onOpenGame }: { onOpenGame: (infoHash: string) => 
           <div className="strip-head">
             <h2 className="strip-title">{section.forumTitle}</h2>
             <div className="spacer" />
+            {onOpenSection && (
+              <button
+                className="btn ghost sm"
+                title={`Открыть раздел «${section.forumTitle}» целиком`}
+                onClick={() =>
+                  onOpenSection({
+                    id: section.forumId,
+                    title: section.forumTitle,
+                    forumIds: [section.forumId],
+                  })
+                }
+              >
+                Показать ещё
+              </button>
+            )}
             <button
               className="btn ghost sm"
               onClick={() => void load(true)}
@@ -91,7 +115,7 @@ export function NewReleases({ onOpenGame }: { onOpenGame: (infoHash: string) => 
               <span>Не удалось загрузить раздел: {section.error}</span>
             </div>
           ) : (
-            <div className="strip">
+            <ScrollStrip>
               {section.items.map((item) => (
                 <ResultCard
                   key={item.topicId}
@@ -101,7 +125,7 @@ export function NewReleases({ onOpenGame }: { onOpenGame: (infoHash: string) => 
                   onDownload={() => download(item)}
                 />
               ))}
-            </div>
+            </ScrollStrip>
           )}
         </div>
       ))}

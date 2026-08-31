@@ -9,6 +9,7 @@ import { history as historyApi, onHistoryUpdated, player as playerApi } from '..
 import { formatDateTime } from '../lib/format'
 import { useStore } from '../lib/store'
 import type { WatchHistoryItem } from '../lib/types'
+import { ScrollStrip } from './ScrollStrip'
 import { Spinner } from './ui'
 import { ConfirmDialog } from './ConfirmDialog'
 
@@ -95,7 +96,7 @@ export function WatchHistory() {
         />
       )}
 
-      <div className="strip">
+      <ScrollStrip>
         {items.map((item) => (
           <div className="result-card" key={item.id}>
             <div className="result-art">
@@ -148,7 +149,7 @@ export function WatchHistory() {
             </div>
           </div>
         ))}
-      </div>
+      </ScrollStrip>
     </div>
   )
 }

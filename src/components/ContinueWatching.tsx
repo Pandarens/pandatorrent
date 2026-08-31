@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react'
 import { history as historyApi, onHistoryUpdated, player as playerApi } from '../lib/api'
 import { useStore } from '../lib/store'
 import type { WatchHistoryItem } from '../lib/types'
+import { ScrollStrip } from './ScrollStrip'
 import { Spinner } from './ui'
 
 /** Below this it is the beginning, and there is nothing to continue. */
@@ -79,7 +80,7 @@ export function ContinueWatching() {
         <div className="spacer" />
       </div>
 
-      <div className="strip">
+      <ScrollStrip>
         {items.map((item) => {
           const at = item.positionSeconds ?? 0
           const total = item.durationSeconds ?? 0
@@ -124,7 +125,7 @@ export function ContinueWatching() {
             </div>
           )
         })}
-      </div>
+      </ScrollStrip>
     </div>
   )
 }
