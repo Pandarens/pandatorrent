@@ -315,6 +315,19 @@ export function PlayerWindow() {
   const fileDone = state?.fileDownloaded ?? null
   const fileTotal = state?.fileTotal ?? null
 
+  /** Arms or disarms "turn the computer off when this finishes". */
+  async function setShutdownAfter(on: boolean) {
+    if (!config) return
+    const next = { ...config, power: { ...config.power, afterPlayback: on } }
+    setConfig(next)
+    await settingsApi.set(next).catch(() => {})
+    // Disarming while the countdown is already up calls it off too.
+    if (!on) {
+      setShuttingDown(false)
+      void powerApi.cancel()
+    }
+  }
+
   async function setNormalize(value: string) {
     if (!config) return
     const next = { ...config, player: { ...config.player, audioNormalize: value } }
@@ -581,6 +594,16 @@ export function PlayerWindow() {
               </button>
             ))}
           </div>
+
+          <div className="pw-panel-title">После просмотра</div>
+          <label className="pw-switch">
+            <input
+              type="checkbox"
+              checked={config?.power.afterPlayback ?? false}
+              onChange={(e) => void setShutdownAfter(e.target.checked)}
+            />
+            <span>Выключить компьютер</span>
+          </label>
 
           {subTracks.some((t) => t.selected) && (
             <>

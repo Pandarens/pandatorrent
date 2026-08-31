@@ -411,6 +411,39 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
 }
 
 /// Pushes live stats to the UI and turns "finished" into a one-shot event.
+/// Pauses finished torrents that have given back as much as was asked of them.
+async fn stop_over_seeded(
+    state: &Arc<AppState>,
+    progress: &[engine::TorrentProgress],
+    stopped: &mut HashSet<String>,
+) {
+    let seeding = state.config.read().seeding.clone();
+    if seeding.ratio_limit <= 0.0 {
+        // The limit can be lifted while running, and then everything paused
+        // for it should be free to start again.
+        stopped.clear();
+        return;
+    }
+
+    for p in progress {
+        if !p.finished || p.state == "paused" || stopped.contains(&p.info_hash) {
+            continue;
+        }
+        if !seeding.should_stop(p.uploaded_bytes, p.total_bytes) {
+            continue;
+        }
+        stopped.insert(p.info_hash.clone());
+        tracing::info!(
+            name = p.name.as_deref().unwrap_or("раздача"),
+            "рейтинг набран, раздача остановлена"
+        );
+        if let Err(e) = state.engine.pause(&p.info_hash).await {
+            tracing::warn!("не удалось остановить раздачу: {e}");
+            stopped.remove(&p.info_hash);
+        }
+    }
+}
+
 /// Whether the main window is actually in front of someone.
 ///
 /// Hidden in the tray or minimised, a pushed update costs a full redraw that
@@ -441,6 +474,9 @@ fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
 
         let mut delay = PROGRESS_INTERVAL;
         let mut was_watched = true;
+        // Torrents already stopped for reaching their ratio, so the engine is
+        // not asked to pause them again on every sweep.
+        let mut stopped: HashSet<String> = HashSet::new();
 
         loop {
             tokio::time::sleep(delay).await;
@@ -459,6 +495,8 @@ fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
                 let _ = state.db.mark_torrent_completed(&hash);
                 let _ = app.emit(events::TORRENT_COMPLETED, p);
             }
+
+            stop_over_seeded(&state, &progress, &mut stopped).await;
 
             // Coming back from the tray gets an immediate update rather than
             // showing figures up to five seconds stale.

@@ -392,6 +392,12 @@ export interface PowerConfig {
   delaySeconds: number
 }
 
+/** When to stop giving a finished download back to the swarm. */
+export interface SeedingConfig {
+  /** Stop after uploading this much relative to the size; 0 means never. */
+  ratioLimit: number
+}
+
 export interface AppConfig {
   downloadDir: string
   network: NetworkConfig
@@ -401,6 +407,7 @@ export interface AppConfig {
   home: HomeConfig
   player: PlayerConfig
   power: PowerConfig
+  seeding: SeedingConfig
 }
 
 export interface SettingsUpdate {

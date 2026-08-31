@@ -591,6 +591,28 @@ export function SettingsView() {
       </div>
 
       <div className="card">
+        <h3 className="card-title">Раздача</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          Скачанное раздаётся дальше — на трекерах от этого зависит рейтинг.
+          Можно остановить раздачу, когда отдано достаточно. Ноль означает
+          раздавать без ограничения.
+        </p>
+        <label className="field" style={{ maxWidth: 280 }}>
+          <span>Остановить при рейтинге</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            step={0.1}
+            value={draft.seeding.ratioLimit}
+            onChange={(e) =>
+              patch((d) => (d.seeding.ratioLimit = Math.max(0, Number(e.target.value) || 0)))
+            }
+          />
+        </label>
+      </div>
+
+      <div className="card">
         <h3 className="card-title">Выключение компьютера</h3>
         <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
           Перед выключением появится обратный отсчёт — любая клавиша или клик его

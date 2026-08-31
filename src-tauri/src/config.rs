@@ -289,6 +289,38 @@ pub struct AppConfig {
     pub player: PlayerConfig,
     #[serde(default)]
     pub power: PowerConfig,
+    #[serde(default)]
+    pub seeding: SeedingConfig,
+}
+
+/// When to stop giving a finished download back to the swarm.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SeedingConfig {
+    /// Stop once this much has been uploaded relative to the size. Zero means
+    /// seed indefinitely, which is what a tracker would rather you did.
+    pub ratio_limit: f64,
+}
+
+impl Default for SeedingConfig {
+    fn default() -> Self {
+        // Unlimited by default: stopping a distribution early is a decision
+        // for the person with the ratio to protect, not a default to inherit.
+        Self { ratio_limit: 0.0 }
+    }
+}
+
+impl SeedingConfig {
+    /// Whether a finished torrent has given back enough and may be stopped.
+    ///
+    /// A torrent of unknown size cannot have a ratio, and a limit of zero is
+    /// the way to say "keep seeding" — both mean the answer is no.
+    pub fn should_stop(&self, uploaded: u64, total: u64) -> bool {
+        if self.ratio_limit <= 0.0 || total == 0 {
+            return false;
+        }
+        uploaded as f64 / total as f64 >= self.ratio_limit
+    }
 }
 
 /// Turning the computer off once there is nothing left to wait for.
@@ -328,6 +360,7 @@ impl Default for AppConfig {
             home: HomeConfig::default(),
             player: PlayerConfig::default(),
             power: PowerConfig::default(),
+            seeding: SeedingConfig::default(),
         }
     }
 }
@@ -352,6 +385,36 @@ impl AppConfig {
         std::fs::write(&tmp, serde_json::to_vec_pretty(self).unwrap())?;
         std::fs::rename(&tmp, path)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod seeding_tests {
+    use super::SeedingConfig;
+
+    fn limit(ratio: f64) -> SeedingConfig {
+        SeedingConfig { ratio_limit: ratio }
+    }
+
+    #[test]
+    fn seeding_is_unlimited_until_a_limit_is_set() {
+        // The default must never stop a distribution: doing so silently is how
+        // a tracker ratio quietly rots.
+        let cfg = SeedingConfig::default();
+        assert!(!cfg.should_stop(u64::MAX, 1_000));
+    }
+
+    #[test]
+    fn stops_once_the_ratio_is_reached() {
+        let cfg = limit(2.0);
+        assert!(!cfg.should_stop(1_999, 1_000));
+        assert!(cfg.should_stop(2_000, 1_000));
+        assert!(cfg.should_stop(5_000, 1_000));
+    }
+
+    #[test]
+    fn a_torrent_of_unknown_size_has_no_ratio() {
+        assert!(!limit(1.0).should_stop(5_000, 0));
     }
 }
 
