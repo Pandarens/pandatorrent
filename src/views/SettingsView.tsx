@@ -591,6 +591,20 @@ export function SettingsView() {
       </div>
 
       <div className="card">
+        <h3 className="card-title">Журнал работы</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          Приложение записывает, что оно делает, в файл. Если что-то пошло не так,
+          журнал показывает причину. Записи старше недели удаляются сами.
+        </p>
+        <button
+          className="btn"
+          onClick={() => void settingsApi.openLogs().catch((e) => reportError(e, 'Журнал'))}
+        >
+          Открыть папку журнала
+        </button>
+      </div>
+
+      <div className="card">
         <h3 className="card-title">Обновление приложения</h3>
         <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
           Новые версии берутся из релизов на GitHub. Устанавливаются только сборки,

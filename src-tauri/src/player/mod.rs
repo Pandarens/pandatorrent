@@ -59,13 +59,42 @@ pub struct Playback {
     pub playlist_pos: Option<usize>,
     pub playlist_count: Option<usize>,
     pub fullscreen: bool,
+    /// File name of the current entry, shown next to the release title when a
+    /// season is playing.
+    pub episode: Option<String>,
 }
+
+/// The names to put on screen for what is currently open.
+///
+/// mpv reports the stream URL as `media-title`, because that is genuinely all
+/// it knows about an HTTP source — so the readable names have to be kept here,
+/// where they were known all along.
+struct NowShowing {
+    title: String,
+    /// File names in playlist order, so entry N here names episode N there.
+    names: Vec<String>,
+}
+
+/// Everything about opening a film that is not the playlist itself.
+#[derive(Debug, Clone, Default)]
+pub struct Opening {
+    /// Where to pick up, for a film that was left part-watched.
+    pub resume_at: Option<f64>,
+    /// Local subtitle files to attach once the file is open.
+    pub subtitles: Vec<String>,
+}
+
+/// How long to keep waiting for mpv to open the file before giving up on
+/// subtitles and the resume point. Streams can take a while to start.
+const OPEN_ATTEMPTS: usize = 120;
+const OPEN_POLL: Duration = Duration::from_millis(500);
 
 pub struct Player {
     app: AppHandle,
     instance: Mutex<Option<Mpv>>,
     /// Lets the window-close callback, which must be `'static`, reach us back.
     self_ref: RwLock<Weak<Player>>,
+    showing: RwLock<Option<NowShowing>>,
 }
 
 impl Player {
@@ -74,6 +103,7 @@ impl Player {
             app,
             instance: Mutex::new(None),
             self_ref: RwLock::new(Weak::new()),
+            showing: RwLock::new(None),
         });
         *me.self_ref.write() = Arc::downgrade(&me);
         me
@@ -127,9 +157,11 @@ impl Player {
     pub async fn play(
         &self,
         items: &[String],
+        names: &[String],
         start: usize,
         title: &str,
         cfg: &PlayerConfig,
+        opening: Opening,
     ) -> AppResult<()> {
         if items.is_empty() {
             return Err(AppError::msg("нечего воспроизводить"));
@@ -165,7 +197,13 @@ impl Player {
             let _ = player.set_property("playlist-pos", &start.to_string());
         }
 
+        *self.showing.write() = Some(NowShowing {
+            title: title.to_string(),
+            names: names.to_vec(),
+        });
         *self.instance.lock() = Some(player);
+
+        self.after_load(opening);
 
         // mpv creates its child window a moment later, so the restacking is
         // retried until it appears — otherwise the video covers the controls.
@@ -233,12 +271,76 @@ impl Player {
     }
 
     /// Live playback state for the controls.
+    /// Things that can only be done once mpv has actually opened the file.
+    ///
+    /// Subtitles cannot be attached and a seek cannot land before playback has
+    /// started, so this waits for a readable position rather than guessing at
+    /// a delay.
+    fn after_load(&self, opening: Opening) {
+        if opening.subtitles.is_empty() && opening.resume_at.is_none() {
+            return;
+        }
+        let Some(me) = self.self_ref.read().upgrade() else {
+            return;
+        };
+
+        tauri::async_runtime::spawn(async move {
+            for _ in 0..OPEN_ATTEMPTS {
+                tokio::time::sleep(OPEN_POLL).await;
+                let ready = {
+                    let guard = me.instance.lock();
+                    match guard.as_ref() {
+                        Some(player) => player.get_property("time-pos").is_some(),
+                        // The viewer closed it while we waited.
+                        None => return,
+                    }
+                };
+                if !ready {
+                    continue;
+                }
+
+                for path in &opening.subtitles {
+                    if let Err(e) = me.command(&["sub-add".to_string(), path.clone()]) {
+                        tracing::warn!("не удалось подключить субтитры {path}: {e}");
+                    }
+                }
+                if let Some(seconds) = opening.resume_at {
+                    tracing::info!(seconds, "продолжаем с сохранённой позиции");
+                    let _ = me.command(&[
+                        "seek".to_string(),
+                        seconds.to_string(),
+                        "absolute".to_string(),
+                    ]);
+                }
+                return;
+            }
+            tracing::warn!("файл так и не открылся — субтитры и позиция не применены");
+        });
+    }
+
     pub fn playback(&self) -> Option<Playback> {
         let guard = self.instance.lock();
         let player = guard.as_ref()?;
-        let title = player.get_property("media-title")?;
+
+        let playlist_pos: Option<usize> = player
+            .get_property("playlist-pos")
+            .and_then(|v| v.parse().ok());
+
+        let showing = self.showing.read();
+        // Falling back to mpv's own title would put a stream URL on screen, so
+        // an unnamed file is better described as simply "видео".
+        let title = showing
+            .as_ref()
+            .map(|s| s.title.clone())
+            .unwrap_or_else(|| "Видео".to_string());
+        let episode = showing
+            .as_ref()
+            .zip(playlist_pos)
+            .and_then(|(s, i)| s.names.get(i).cloned());
+
         Some(Playback {
             title,
+            episode,
             position: player.get_property("time-pos").and_then(|v| v.parse().ok()),
             duration: player.get_property("duration").and_then(|v| v.parse().ok()),
             paused: player
@@ -250,9 +352,7 @@ impl Player {
                 .get_property("mute")
                 .map(|v| v == "yes")
                 .unwrap_or(false),
-            playlist_pos: player
-                .get_property("playlist-pos")
-                .and_then(|v| v.parse().ok()),
+            playlist_pos,
             playlist_count: player
                 .get_property("playlist-count")
                 .and_then(|v| v.parse().ok()),
@@ -293,6 +393,7 @@ impl Player {
         // Taken out under the lock, dropped outside it. `mpv_terminate_destroy`
         // waits for mpv's own threads to wind down, and doing that while
         // holding the mutex blocked every other player call.
+        *self.showing.write() = None;
         let instance = self.instance.lock().take();
         if let Some(player) = instance {
             // Quitting first aborts the in-flight network read; without it
@@ -351,6 +452,14 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mkv", "mp4", "avi", "m4v", "mov", "ts", "m2ts", "mpg", "mpeg", "wmv", "webm", "flv", "vob",
     "ogm", "rmvb", "divx",
 ];
+
+/// Subtitle files worth attaching to a film.
+pub fn is_subtitle_file(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    ["srt", "ass", "ssa", "sub", "vtt"]
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")))
+}
 
 pub fn is_video_file(name: &str) -> bool {
     let lower = name.to_lowercase();

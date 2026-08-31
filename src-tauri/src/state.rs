@@ -51,6 +51,11 @@ pub struct NowPlaying {
     pub info_hash: String,
     /// File indices in playlist order, so index N here is episode N there.
     pub files: Vec<usize>,
+    /// File names in the same order, used to record the viewing position
+    /// against the right episode.
+    pub names: Vec<String>,
+    /// Tracker topic this came from, when it came from one.
+    pub topic_id: Option<i64>,
 }
 
 /// A release streamed straight into the cache instead of the library.

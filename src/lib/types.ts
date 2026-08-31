@@ -304,6 +304,8 @@ export interface Playback {
   paused: boolean
   volume: number | null
   muted: boolean
+  /** File name of the current entry, for a season. */
+  episode: string | null
   /** Current episode index within the playlist. */
   playlistPos: number | null
   playlistCount: number | null
@@ -332,6 +334,9 @@ export interface WatchHistoryItem {
   watchedAt: number
   /** Streamed without being kept — the files are already gone. */
   temporary: boolean
+  /** How far the viewer got, in seconds. */
+  positionSeconds: number | null
+  durationSeconds: number | null
 }
 
 export interface PlayerStatus {
@@ -402,4 +407,6 @@ export interface AppInfo {
   version: string
   dataDir: string
   coversDir: string
+  /** Folder holding the log files. */
+  logsDir: string
 }

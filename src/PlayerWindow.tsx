@@ -19,6 +19,10 @@ import type { AppConfig, Playback } from './lib/types'
 
 /** Fast enough for a smooth progress bar, cheap enough to leave running. */
 const POLL_MS = 400
+// A stream that has not advanced for this long has stopped, not buffered.
+// Generous on purpose: a slow torrent legitimately pauses to fill its buffer,
+// and crying wolf over that would be worse than saying nothing.
+const STALL_MS = 20000
 /** How long the mouse must be still before the controls fade away. */
 const IDLE_MS = 2600
 /** How long a control the user touched keeps its own value. */
@@ -45,6 +49,8 @@ export function PlayerWindow() {
   const [active, setActive] = useState(true)
   const [hovering, setHovering] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [stalled, setStalled] = useState(false)
+  const progressRef = useRef({ position: -1, since: 0 })
   const [onTop, setOnTop] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
 
@@ -83,6 +89,22 @@ export function PlayerWindow() {
         setState(next)
         setError(null)
         const now = Date.now()
+
+        // Playback is judged by the clock moving, not by mpv reporting a
+        // fault: when a torrent stream dies it simply stops delivering, and
+        // nothing else says so.
+        const running = next && !next.paused && (next.duration ?? 0) > 0
+        const position = next?.position ?? 0
+        if (!running) {
+          progressRef.current = { position, since: now }
+          setStalled(false)
+        } else if (Math.abs(position - progressRef.current.position) > 0.25) {
+          progressRef.current = { position, since: now }
+          setStalled(false)
+        } else if (now - progressRef.current.since > STALL_MS) {
+          setStalled(true)
+        }
+
         // Adopt the reported values only once the user has let go.
         if (next && now > heldUntil.current.volume) setVolume(null)
         if (next && now > heldUntil.current.paused) setPaused(null)
@@ -174,12 +196,27 @@ export function PlayerWindow() {
   const duration = state?.duration ?? 0
   // Until mpv knows the length there is nothing to show but a blank window, so
   // the placeholder stands in for it rather than leaving an empty rectangle.
+  // Seeking to where we already are makes the player re-request the stream,
+  // which is exactly what is needed after it has gone quiet.
+  const retry = useCallback(async () => {
+    const at = Math.max(0, (state?.position ?? 0) - 1)
+    setStalled(false)
+    progressRef.current = { position: -1, since: Date.now() }
+    await playerApi.seekTo(at).catch(() => {})
+  }, [state])
+
   const loading = !state || duration <= 0
+  // mpv reports the stream URL as its media title, so the readable name comes
+  // from the app instead; the episode file name is added only when there is a
+  // season to tell apart.
+  const heading = state?.title ?? 'Загрузка…'
   const position = scrub ?? state?.position ?? 0
   const shownVolume = volume ?? Math.round(state?.volume ?? 100)
   const isPaused = paused ?? state?.paused ?? false
   const episodes = state?.playlistCount ?? 0
   const episode = (state?.playlistPos ?? 0) + 1
+  // Only worth naming the file when there is a season to tell apart.
+  const subheading = episodes > 1 ? (state?.episode ?? null) : null
   const progress = duration > 0 ? (position / duration) * 100 : 0
   const normalize = config?.player.audioNormalize ?? 'off'
   const speed = state?.downloadSpeedBps ?? null
@@ -239,11 +276,16 @@ export function PlayerWindow() {
             if (e.button === 0 && e.target === e.currentTarget) void appWindow.startDragging()
           }}
         >
-          <span className="pw-name" title={state?.title ?? ''}>
-            {state?.title ?? 'Загрузка…'}
+          <span className="pw-name" title={heading}>
+            {heading}
           </span>
+          {subheading && (
+            <span className="pw-episode" title={subheading}>
+              {subheading}
+            </span>
+          )}
           {episodes > 1 && (
-            <span className="pw-episode">
+            <span className="pw-episode-count">
               Серия {episode} из {episodes}
             </span>
           )}
@@ -287,6 +329,11 @@ export function PlayerWindow() {
         </button>
       </div>
 
+      {/* Solid backing while the picture is missing: the window is transparent
+          so that video shows through the interface, which without this leaves
+          the desktop visible until the first frame arrives. */}
+      {loading && <div className="pw-backdrop" />}
+
       {loading && !error && (
         <div className="pw-loading">
           <div className="pw-loading-art">
@@ -295,13 +342,26 @@ export function PlayerWindow() {
             <span />
             <span />
           </div>
-          <div className="pw-loading-title">{state?.title ?? 'Готовим поток'}</div>
+          <div className="pw-loading-title">{heading}</div>
+          {subheading && <div className="pw-loading-episode">{subheading}</div>}
           <div className="pw-loading-hint">
             Фильм начнёт играть, как только скачается начало — обычно несколько секунд
           </div>
         </div>
       )}
       {error && <div className="pw-center pw-error">{error}</div>}
+
+      {stalled && !error && (
+        <div className="pw-center pw-stall">
+          <div className="pw-stall-title">Поток остановился</div>
+          <div className="pw-stall-hint">
+            Данные перестали приходить — возможно, нет раздающих или пропала сеть.
+          </div>
+          <button className="btn primary" onClick={() => void retry()}>
+            Повторить
+          </button>
+        </div>
+      )}
 
       <div
         className="pw-bottom"

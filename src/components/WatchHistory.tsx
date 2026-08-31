@@ -7,6 +7,15 @@ import { useEffect, useState } from 'react'
 
 import { history as historyApi, onHistoryUpdated, player as playerApi } from '../lib/api'
 import { formatDateTime } from '../lib/format'
+
+/** Seconds as `1:23:45`, or `4:07` for anything under an hour. */
+function formatClock(seconds: number): string {
+  const total = Math.floor(seconds)
+  const parts = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60]
+  const [h, m, sec] = parts
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
+}
 import { useStore } from '../lib/store'
 import type { WatchHistoryItem } from '../lib/types'
 import { Spinner } from './ui'
@@ -108,6 +117,11 @@ export function WatchHistory() {
               )}
               <div className="result-card-meta">
                 <span>{formatDateTime(item.watchedAt)}</span>
+                {item.positionSeconds != null && item.positionSeconds > 30 && (
+                  <span className="tag" title="Просмотр продолжится с этого места">
+                    ⏵ {formatClock(item.positionSeconds)}
+                  </span>
+                )}
               </div>
               <button
                 className="btn primary sm card-dl"

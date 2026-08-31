@@ -214,6 +214,11 @@ function TorrentRow({
         </span>
         {progress && !finished && <span>↓ {formatSpeed(progress.downloadSpeedBps)}</span>}
         {progress && <span>↑ {formatSpeed(progress.uploadSpeedBps)}</span>}
+        {progress && total > 0 && (
+          <span title="Отдано по отношению к размеру раздачи">
+            Рейтинг: {(progress.uploadedBytes / total).toFixed(2)}
+          </span>
+        )}
         {progress && !finished && <span>Осталось: {formatEta(progress.etaSeconds)}</span>}
         {progress && (
           <span>

@@ -2001,7 +2001,50 @@ body:has(.pw) {
 
 
 /* Shown until the first pieces arrive and mpv knows the film's length. */
+.pw-stall {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 30px;
+  border-radius: 14px;
+  background: rgba(8, 10, 14, 0.88);
+  text-align: center;
+  z-index: 2;
+}
+
+.pw-stall-title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pw-stall-hint {
+  color: var(--muted, #9aa3ad);
+  font-size: 12.5px;
+  max-width: 340px;
+}
+
+.pw-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #0b0d11;
+  z-index: 0;
+}
+
+.pw-loading-episode {
+  color: var(--muted, #9aa3ad);
+  font-size: 13px;
+}
+
+.pw-episode-count {
+  color: var(--muted, #9aa3ad);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .pw-loading {
+  position: relative;
+  z-index: 1;
   align-self: center;
   display: flex;
   flex-direction: column;

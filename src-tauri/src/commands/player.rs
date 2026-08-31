@@ -14,6 +14,7 @@ use crate::db::models::{TorrentSource, WatchHistoryItem};
 use crate::engine::{AddOptions, AddSource, TorrentFileEntry};
 use crate::error::{AppError, AppResult};
 use crate::player::{self, Playback, PlayerStatus};
+use crate::player::Opening;
 use crate::state::{AppState, NowPlaying, TempWatch};
 
 /// How long to wait for a freshly added torrent to become streamable.
@@ -175,19 +176,44 @@ pub async fn player_play(
         .iter()
         .map(|f| state.streams.url_for(&info_hash, f.index))
         .collect();
+    let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
     let title = files[start].name.clone();
-
-    let cfg = state.config.read().player.clone();
-    state.player.play(&urls, start, &title, &cfg).await?;
-
-    remember_and_prefetch(&state, &info_hash, files.iter().map(|f| f.index).collect());
 
     let record = state.db.get_torrent(&info_hash)?;
     let topic_id = record.as_ref().and_then(|r| r.topic_id);
+    // The release name reads better on screen than the file name, which is
+    // often a string of tags.
+    let display = record
+        .as_ref()
+        .map(|r| r.name.clone())
+        .unwrap_or_else(|| title.clone());
+
+    let opening = Opening {
+        resume_at: state
+            .db
+            .history_position(topic_id, Some(&title))
+            .unwrap_or(None),
+        subtitles: subtitle_paths(&state, &info_hash, &title),
+    };
+
+    let cfg = state.config.read().player.clone();
+    state
+        .player
+        .play(&urls, &names, start, &display, &cfg, opening)
+        .await?;
+
+    remember_and_prefetch(
+        &state,
+        &info_hash,
+        files.iter().map(|f| f.index).collect(),
+        names,
+        topic_id,
+    );
+
     state.db.history_add(
         topic_id,
         Some(&info_hash),
-        record.as_ref().map(|r| r.name.as_str()).unwrap_or(&title),
+        &display,
         Some(&title),
         topic_id.and_then(|id| cached_preview(&state, id)).as_deref(),
         false,
@@ -265,8 +291,18 @@ pub async fn player_watch_topic(
     // Only now: librqbit refuses to change the file selection while a torrent
     // is still initializing, which is what made this fail on the first click.
     // Everything but the video is dead weight for a one-off viewing.
-    if videos.len() < added.files.len() {
-        narrow_to_videos(&state, &added.info_hash, &videos).await;
+    // Subtitles ride along: they are a few kilobytes, and excluding them is
+    // what left external subtitles unavailable for a streamed film.
+    let mut wanted = videos.clone();
+    wanted.extend(
+        added
+            .files
+            .iter()
+            .filter(|f| player::is_subtitle_file(&f.name))
+            .map(|f| f.index),
+    );
+    if wanted.len() < added.files.len() {
+        narrow_to_videos(&state, &added.info_hash, &wanted).await;
     }
 
     let files = video_files(&state, &added.info_hash)?;
@@ -274,18 +310,32 @@ pub async fn player_watch_topic(
         .iter()
         .map(|f| state.streams.url_for(&added.info_hash, f.index))
         .collect();
+    let names: Vec<String> = files.iter().map(|f| f.name.clone()).collect();
     let display = title
         .filter(|t| !t.trim().is_empty())
         .or_else(|| added.name.clone())
         .unwrap_or_else(|| files[0].name.clone());
 
+    let opening = Opening {
+        resume_at: state
+            .db
+            .history_position(Some(topic_id), files.first().map(|f| f.name.as_str()))
+            .unwrap_or(None),
+        subtitles: subtitle_paths(&state, &added.info_hash, &names[0]),
+    };
+
     let cfg = state.config.read().player.clone();
-    state.player.play(&urls, 0, &display, &cfg).await?;
+    state
+        .player
+        .play(&urls, &names, 0, &display, &cfg, opening)
+        .await?;
 
     remember_and_prefetch(
         &state,
         &added.info_hash,
         files.iter().map(|f| f.index).collect(),
+        names,
+        Some(topic_id),
     );
 
     state.db.history_add(
@@ -319,15 +369,61 @@ async fn narrow_to_videos(state: &AppState, info_hash: &str, videos: &[usize]) {
     }
 }
 
+/// Subtitle files in the release that belong to the given video.
+///
+/// Matching is by name: `Film.2019.mkv` takes `Film.2019.srt` and
+/// `Film.2019.rus.srt`. A release with a single video hands over all of its
+/// subtitles, since there is nothing else they could belong to.
+fn subtitle_paths(state: &AppState, info_hash: &str, video_name: &str) -> Vec<String> {
+    let Ok(details) = state.engine.details(info_hash) else {
+        return Vec::new();
+    };
+    let stem = video_name
+        .rsplit_once('.')
+        .map(|(s, _)| s.to_lowercase())
+        .unwrap_or_else(|| video_name.to_lowercase());
+    let single_video = details
+        .files
+        .iter()
+        .filter(|f| player::is_video_file(&f.name))
+        .count()
+        <= 1;
+
+    let root = std::path::Path::new(&details.output_folder);
+    details
+        .files
+        .iter()
+        .filter(|f| player::is_subtitle_file(&f.name))
+        .filter(|f| single_video || f.name.to_lowercase().starts_with(&stem))
+        .map(|f| {
+            let mut path = root.to_path_buf();
+            for part in &f.components {
+                path.push(part);
+            }
+            path.to_string_lossy().to_string()
+        })
+        // A subtitle file that has not been downloaded yet cannot be attached.
+        .filter(|path| std::path::Path::new(path).exists())
+        .collect()
+}
+
 /// Records what is playing and starts pulling the following episode.
 ///
 /// Waiting for the viewer to reach episode two before downloading it means a
 /// pause at every episode boundary; fetching it while episode one plays out
 /// removes that wait.
-fn remember_and_prefetch(state: &Arc<AppState>, info_hash: &str, files: Vec<usize>) {
+fn remember_and_prefetch(
+    state: &Arc<AppState>,
+    info_hash: &str,
+    files: Vec<usize>,
+    names: Vec<String>,
+    topic_id: Option<i64>,
+) {
     *state.now_playing.lock() = Some(NowPlaying {
         info_hash: info_hash.to_string(),
         files: files.clone(),
+        names,
+        topic_id,
     });
 
     let state = state.clone();

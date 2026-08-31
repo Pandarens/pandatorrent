@@ -15,7 +15,12 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::AppResult;
 use models::*;
 
-const SCHEMA_VERSION: i32 = 4;
+const SCHEMA_VERSION: i32 = 5;
+
+/// Below this, resuming is not worth offering — it is effectively the start.
+const RESUME_MIN_SECONDS: f64 = 30.0;
+/// This close to the end counts as watched, so there is nothing to resume.
+const RESUME_TAIL_SECONDS: f64 = 60.0;
 
 #[derive(Clone)]
 pub struct Db {
@@ -136,6 +141,9 @@ impl Db {
                 watched_at INTEGER NOT NULL,
                 -- 1 when it was a "just watch it" stream that gets deleted.
                 temporary  INTEGER NOT NULL DEFAULT 0,
+                -- How far the viewer got, so playback can be picked up again.
+                position_seconds REAL,
+                duration_seconds REAL,
                 UNIQUE(topic_id, file_name)
             );
             CREATE INDEX IF NOT EXISTS idx_history_time ON watch_history(watched_at DESC);
@@ -146,6 +154,17 @@ impl Db {
             );
             "#,
         )?;
+        // Added in schema 5. The batch above only creates missing tables, so a
+        // database from an earlier version still has the old shape and needs
+        // the columns added; a fresh one already has them and rejects this,
+        // which is why the error is dropped rather than raised.
+        for column in ["position_seconds REAL", "duration_seconds REAL"] {
+            let _ = conn.execute(
+                &format!("ALTER TABLE watch_history ADD COLUMN {column}"),
+                [],
+            );
+        }
+
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
     }
@@ -412,10 +431,67 @@ impl Db {
         Ok(())
     }
 
+    /// Records how far into a file the viewer has got.
+    ///
+    /// Written periodically while something plays, so that closing the player —
+    /// or losing it to a crash — still leaves a place to pick up from.
+    pub fn history_set_position(
+        &self,
+        topic_id: Option<i64>,
+        file_name: Option<&str>,
+        position: f64,
+        duration: Option<f64>,
+    ) -> AppResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE watch_history
+                SET position_seconds = ?3,
+                    duration_seconds = COALESCE(?4, duration_seconds)
+              WHERE topic_id IS ?1 AND file_name IS ?2",
+            params![topic_id, file_name, position, duration],
+        )?;
+        Ok(())
+    }
+
+    /// Where to pick this file up from, if it was left part-watched.
+    ///
+    /// A position within the last half-minute of the file means it was watched
+    /// to the end, and offering to resume there would be useless.
+    pub fn history_position(
+        &self,
+        topic_id: Option<i64>,
+        file_name: Option<&str>,
+    ) -> AppResult<Option<f64>> {
+        let conn = self.conn.lock();
+        let row: Option<(Option<f64>, Option<f64>)> = conn
+            .query_row(
+                "SELECT position_seconds, duration_seconds FROM watch_history
+                  WHERE topic_id IS ?1 AND file_name IS ?2",
+                params![topic_id, file_name],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+
+        let Some((Some(position), duration)) = row else {
+            return Ok(None);
+        };
+        // Skipping back to the very start is not "resuming", it is just noise.
+        if position < RESUME_MIN_SECONDS {
+            return Ok(None);
+        }
+        if let Some(total) = duration {
+            if position > total - RESUME_TAIL_SECONDS {
+                return Ok(None);
+            }
+        }
+        Ok(Some(position))
+    }
+
     pub fn history_list(&self, limit: usize) -> AppResult<Vec<WatchHistoryItem>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT id, topic_id, info_hash, title, file_name, image_url, watched_at, temporary
+            "SELECT id, topic_id, info_hash, title, file_name, image_url, watched_at, temporary,
+                    position_seconds, duration_seconds
              FROM watch_history ORDER BY watched_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map(params![limit as i64], |r| {
@@ -428,6 +504,8 @@ impl Db {
                 image_url: r.get(5)?,
                 watched_at: r.get(6)?,
                 temporary: r.get::<_, i64>(7)? != 0,
+                position_seconds: r.get(8)?,
+                duration_seconds: r.get(9)?,
             })
         })?;
         Ok(rows.collect::<Result<_, _>>()?)

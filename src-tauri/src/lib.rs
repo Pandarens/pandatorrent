@@ -53,6 +53,11 @@ pub fn run() {
                 )?;
             }
 
+            // Before the state, so that anything going wrong while it is
+            // built is written down rather than lost.
+            init_logging(&app_data_dir(app.handle()));
+            tracing::info!(version = env!("CARGO_PKG_VERSION"), "запуск");
+
             let state = init_state(app.handle())?;
             app.manage(state.clone());
 
@@ -137,6 +142,7 @@ pub fn run() {
             commands::settings::settings_set,
             commands::settings::settings_mirrors,
             commands::settings::app_info,
+            commands::settings::logs_open,
             commands::app_update::app_update_check,
             commands::app_update::app_update_install,
             commands::player::player_status,
@@ -154,13 +160,69 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
-    // Tauri's own app-data directory keeps the asset-protocol scope (`$APPDATA`)
-    // and the cover cache in agreement.
-    let data_dir = app
-        .path()
+/// Where application data lives.
+///
+/// Tauri's own app-data directory keeps the asset-protocol scope (`$APPDATA`)
+/// and the cover cache in agreement.
+fn app_data_dir(app: &AppHandle) -> std::path::PathBuf {
+    app.path()
         .app_data_dir()
-        .unwrap_or_else(|_| state::resolve_data_dir());
+        .unwrap_or_else(|_| state::resolve_data_dir())
+}
+
+/// Log files older than this are removed on startup.
+const LOG_RETENTION: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// Starts writing the log to a file under the data directory.
+///
+/// Before this existed nothing set up a subscriber, so every `tracing::warn!`
+/// in the code went nowhere and a fault the user hit left nothing to read
+/// afterwards. Faults in here are swallowed on purpose: failing to open a log
+/// file is not a reason to refuse to start.
+fn init_logging(data_dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let dir = data_dir.join("logs");
+    std::fs::create_dir_all(&dir).ok()?;
+    prune_old_logs(&dir);
+
+    let appender = tracing_appender::rolling::daily(&dir, "panda-torrent.log");
+    let (writer, guard) = tracing_appender::non_blocking(appender);
+    // The guard flushes on drop, and it has to outlive every log call, so it
+    // is deliberately kept for the lifetime of the process.
+    std::mem::forget(guard);
+
+    // librqbit is chatty at info level; the app's own messages are the point.
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,librqbit=warn"));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(writer)
+        .with_ansi(false)
+        .try_init()
+        .ok()?;
+
+    Some(dir)
+}
+
+/// Keeps the log folder from growing without end.
+fn prune_old_logs(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .map(|t| t.elapsed().map(|age| age > LOG_RETENTION).unwrap_or(false))
+            .unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
+    let data_dir = app_data_dir(app);
     std::fs::create_dir_all(&data_dir)?;
 
     let config_path = state::config_path(&data_dir);
@@ -262,6 +324,34 @@ fn spawn_browser_reaper(state: Arc<AppState>) {
     });
 }
 
+/// Writes down how far into the film the viewer has got.
+///
+/// Called on the sweep rather than on closing: the player can go away without
+/// warning, and a position saved a few seconds ago is far better than none.
+fn save_watch_position(state: &Arc<AppState>) {
+    let Some(playback) = state.player.playback() else {
+        return;
+    };
+    let Some(position) = playback.position else {
+        return;
+    };
+    let guard = state.now_playing.lock();
+    let Some(current) = guard.as_ref() else {
+        return;
+    };
+    let name = playback
+        .playlist_pos
+        .and_then(|i| current.names.get(i).cloned());
+    if let Err(e) = state.db.history_set_position(
+        current.topic_id,
+        name.as_deref(),
+        position,
+        playback.duration,
+    ) {
+        tracing::warn!("не удалось сохранить позицию просмотра: {e}");
+    }
+}
+
 /// How long a "just watch it" download survives after the film is closed.
 const TEMP_WATCH_GRACE: Duration = Duration::from_secs(5 * 60);
 
@@ -286,6 +376,9 @@ fn spawn_temp_watch_reaper(state: Arc<AppState>) {
             }
 
             let playing = state.player.is_playing();
+            if playing {
+                save_watch_position(&state);
+            }
             let mut to_pause = None;
             let mut expired = None;
 

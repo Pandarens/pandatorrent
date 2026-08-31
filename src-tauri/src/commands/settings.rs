@@ -3,10 +3,11 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::config::{AppConfig, RUTRACKER_MIRRORS};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::state::AppState;
 
 #[derive(Debug, Clone, Serialize)]
@@ -79,6 +80,8 @@ pub struct AppInfo {
     pub version: String,
     pub data_dir: String,
     pub covers_dir: String,
+    /// Folder holding the log files, for the "open log folder" button.
+    pub logs_dir: String,
 }
 
 #[tauri::command]
@@ -87,5 +90,20 @@ pub async fn app_info(state: State<'_, Arc<AppState>>) -> AppResult<AppInfo> {
         version: env!("CARGO_PKG_VERSION").to_string(),
         data_dir: state.data_dir.to_string_lossy().to_string(),
         covers_dir: state.covers_dir().to_string_lossy().to_string(),
+        logs_dir: state.data_dir.join("logs").to_string_lossy().to_string(),
     })
+}
+
+/// Opens the log folder in Explorer.
+///
+/// Reporting a fault is much easier with the file in front of you than with a
+/// path to copy out by hand.
+#[tauri::command]
+pub async fn logs_open(app: AppHandle, state: State<'_, Arc<AppState>>) -> AppResult<()> {
+    let dir = state.data_dir.join("logs");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::msg(format!("не удалось создать папку журнала: {e}")))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::msg(format!("не удалось открыть папку журнала: {e}")))
 }

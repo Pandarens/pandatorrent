@@ -93,6 +93,11 @@ pub struct WatchHistoryItem {
     pub watched_at: i64,
     /// It was streamed without being kept, so the files are already gone.
     pub temporary: bool,
+    /// How far in the viewer had got, in seconds.
+    pub position_seconds: Option<f64>,
+    /// Length of the file, so the UI can tell "nearly finished" from "just
+    /// started" without opening it.
+    pub duration_seconds: Option<f64>,
 }
 
 /// A tracker topic being polled for re-uploads.
