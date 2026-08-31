@@ -260,6 +260,33 @@ fn prune_old_logs(dir: &std::path::Path) {
     }
 }
 
+/// Clears out "watch online" leftovers from a previous run.
+///
+/// Deleting the cache folder takes the files, but the torrent itself lived on
+/// in the engine session and in the database. A viewing interrupted by closing
+/// the application therefore came back as a phantom download pointing at files
+/// that no longer exist — re-checking itself on every launch and sitting in the
+/// list as something the viewer never downloaded.
+fn drop_stream_leftovers(db: &Db, engine: &Arc<Engine>, cache: &std::path::Path) {
+    let Ok(rows) = db.list_torrents() else {
+        return;
+    };
+    for row in rows
+        .into_iter()
+        .filter(|r| std::path::Path::new(&r.output_folder).starts_with(cache))
+    {
+        tracing::info!(name = %row.name, "убираем незакрытый просмотр");
+        // `forget` rather than `delete`: the files went with the folder, and
+        // asking the engine to remove them again only produces noise.
+        if let Err(e) = tauri::async_runtime::block_on(engine.forget(&row.info_hash)) {
+            tracing::warn!("не удалось убрать просмотр из сессии: {e}");
+        }
+        if let Err(e) = db.delete_torrent(&row.info_hash) {
+            tracing::warn!("не удалось убрать просмотр из базы: {e}");
+        }
+    }
+}
+
 fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let data_dir = app_data_dir(app);
     std::fs::create_dir_all(&data_dir)?;
@@ -292,6 +319,7 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
             tracing::warn!("could not clear the stream cache: {e}");
         }
     }
+    drop_stream_leftovers(&db, &engine, &cache);
 
     let streams = Arc::new(tauri::async_runtime::block_on(StreamServer::start(
         engine.clone(),
