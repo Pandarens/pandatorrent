@@ -2355,8 +2355,22 @@ body:has(.pw) {
   position: relative;
 }
 
+/* Snapping fought every programmatic scroll: each frame of a hover-scroll got
+   yanked back to the nearest card, which is what made the row lurch. Inside a
+   strip with arrows, the scrolling is ours to control. */
 .strip-scroll .strip {
+  scroll-snap-type: none;
   scroll-behavior: auto;
+  /* The arrows replace it, and it was covering the bottom of the cards. */
+  scrollbar-width: none;
+}
+
+.strip-scroll .strip::-webkit-scrollbar {
+  height: 0;
+}
+
+.strip-scroll .strip > * {
+  scroll-snap-align: none;
 }
 
 .strip-arrow {
@@ -2373,11 +2387,13 @@ body:has(.pw) {
   font-size: 30px;
   line-height: 1;
   cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease;
+  /* Visible whenever there is somewhere to scroll to — an arrow that only
+     appears once the pointer is already over the row is an arrow nobody
+     finds. It brightens on approach rather than appearing from nothing. */
+  opacity: 0.55;
+  transition: opacity 0.18s ease, color 0.18s ease;
 }
 
-/* Out of the way until the row is actually being used. */
 .strip-scroll:hover .strip-arrow,
 .strip-arrow:focus-visible {
   opacity: 1;
@@ -2386,13 +2402,15 @@ body:has(.pw) {
 .strip-arrow.left {
   left: 0;
   border-radius: 10px 0 0 10px;
-  background: linear-gradient(90deg, rgba(12, 14, 19, 0.95), rgba(12, 14, 19, 0));
+  background: linear-gradient(90deg, rgba(12, 14, 19, 0.98) 40%, rgba(12, 14, 19, 0));
+  padding-right: 12px;
 }
 
 .strip-arrow.right {
   right: 0;
   border-radius: 0 10px 10px 0;
-  background: linear-gradient(270deg, rgba(12, 14, 19, 0.95), rgba(12, 14, 19, 0));
+  background: linear-gradient(270deg, rgba(12, 14, 19, 0.98) 40%, rgba(12, 14, 19, 0));
+  padding-left: 12px;
 }
 
 .strip-arrow:hover {
