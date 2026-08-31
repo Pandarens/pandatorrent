@@ -2270,3 +2270,82 @@ body:has(.pw) {
   height: 100%;
   background: var(--accent, #57c26a);
 }
+
+/* The picture: a click target covering the whole window, beneath the chrome. */
+.pw-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* Bars and panels stay above the click surface. */
+.pw-top,
+.pw-bottom {
+  z-index: 2;
+}
+
+.pw-panel {
+  z-index: 5;
+}
+
+/* The standing "paused" button in the middle of the picture. */
+.pw-bigplay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 84px;
+  height: 84px;
+  padding: 0 0 0 6px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(10, 12, 17, 0.62);
+  color: #fff;
+  font-size: 34px;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.pw-bigplay:hover {
+  background: rgba(10, 12, 17, 0.8);
+  transform: translate(-50%, -50%) scale(1.06);
+}
+
+/* The momentary acknowledgement of a click on the picture. */
+.pw-flash {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 92px;
+  height: 92px;
+  border-radius: 50%;
+  background: rgba(10, 12, 17, 0.55);
+  color: #fff;
+  font-size: 36px;
+  pointer-events: none;
+  animation: pw-flash 0.5s ease-out forwards;
+}
+
+@keyframes pw-flash {
+  from {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(0.85);
+  }
+  to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.25);
+  }
+}
+
+/* Nothing to point at once the controls have gone. */
+.pw.idle {
+  cursor: none;
+}

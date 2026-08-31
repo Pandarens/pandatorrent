@@ -60,6 +60,14 @@ export function PlayerWindow() {
   // Which pop-out panel is open, if any. One at a time: they occupy the same
   // corner and two of them at once would just cover the film.
   const [panel, setPanel] = useState<'tracks' | 'episodes' | null>(null)
+  // A brief icon shown where the pointer expects it, the way every other
+  // player acknowledges a click on the picture.
+  const [flash, setFlash] = useState<{ icon: string; id: number } | null>(null)
+  // Separates a single click from the first half of a double click.
+  const clickTimer = useRef<number | null>(null)
+  const flashId = useRef(0)
+  const pausedRef = useRef(false)
+  const isPausedNow = () => pausedRef.current
   const progressRef = useRef({ position: -1, since: 0 })
   const [onTop, setOnTop] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -190,15 +198,51 @@ export function PlayerWindow() {
         case 'm':
           void playerApi.toggleMute()
           break
+        case 'j':
+          e.preventDefault()
+          void playerApi.seekBy(-10)
+          break
+        case 'l':
+          e.preventDefault()
+          void playerApi.seekBy(10)
+          break
+        case 'n':
+          void playerApi.nextEpisode()
+          break
+        case 'p':
+          void playerApi.prevEpisode()
+          break
+        case '[':
+          void playerApi.setSpeed(Math.max(0.25, (state?.speed ?? 1) - 0.25))
+          break
+        case ']':
+          void playerApi.setSpeed(Math.min(4, (state?.speed ?? 1) + 0.25))
+          break
         case 'Escape':
           if (fullscreen) void toggleFullscreen()
           else void appWindow.close()
           break
+        default:
+          // 0–9 jump to that tenth of the film.
+          if (e.key >= '0' && e.key <= '9' && (state?.duration ?? 0) > 0) {
+            e.preventDefault()
+            const fraction = Number(e.key) / 10
+            void playerApi.seekTo((state?.duration ?? 0) * fraction)
+          }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePause, toggleFullscreen, changeVolume, volume, state?.volume, fullscreen])
+  }, [
+    togglePause,
+    toggleFullscreen,
+    changeVolume,
+    volume,
+    state?.volume,
+    state?.speed,
+    state?.duration,
+    fullscreen,
+  ])
 
   const duration = state?.duration ?? 0
   // Until mpv knows the length there is nothing to show but a blank window, so
@@ -224,6 +268,27 @@ export function PlayerWindow() {
   const downloading = (state?.downloadSpeedBps ?? 0) > 0
   const buffering = frozenFor > BUFFER_MS && downloading
   const stalled = frozenFor > STALL_MS && !downloading
+
+  // Clicking the picture toggles playback; double-clicking goes full screen.
+  // The single click is held back briefly, otherwise a double click would
+  // pause the film on its way to changing the window.
+  const stageClick = useCallback(() => {
+    if (clickTimer.current != null) return
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null
+      flashId.current += 1
+      setFlash({ icon: isPausedNow() ? '▶' : '⏸', id: flashId.current })
+      togglePause()
+    }, 190)
+  }, [])
+
+  const stageDoubleClick = useCallback(() => {
+    if (clickTimer.current != null) {
+      window.clearTimeout(clickTimer.current)
+      clickTimer.current = null
+    }
+    void toggleFullscreen()
+  }, [])
 
   const loading = !state || duration <= 0
   // mpv reports the stream URL as its media title, so the readable name comes
@@ -256,10 +321,13 @@ export function PlayerWindow() {
   // film, where the controls are exactly what the viewer is looking at.
   const visible = active || hovering || isPaused
 
+  // Read through a ref so the click handlers do not need rebuilding on every
+  // poll, which would restart the double-click timer.
+  pausedRef.current = isPaused
+
   return (
     <div
       className={visible ? 'pw' : 'pw idle'}
-      onDoubleClick={() => void toggleFullscreen()}
       // The wheel is the natural way to change volume over a video.
       onWheel={(e) => {
         changeVolume(shownVolume + (e.deltaY < 0 ? WHEEL_STEP : -WHEEL_STEP))
@@ -282,6 +350,30 @@ export function PlayerWindow() {
             onMouseDown={() => appWindow.startResizeDragging('SouthWest')}
           />
         </>
+      )}
+
+      {/* The picture itself. Sits under everything else, so the controls,
+          the panels and the loading screen all keep their own clicks. */}
+      <div className="pw-stage" onClick={stageClick} onDoubleClick={stageDoubleClick} />
+
+      {isPaused && !loading && !error && (
+        <button
+          className="pw-bigplay"
+          title="Продолжить (пробел)"
+          onClick={togglePause}
+        >
+          ▶
+        </button>
+      )}
+
+      {flash && (
+        <div
+          className="pw-flash"
+          key={flash.id}
+          onAnimationEnd={() => setFlash(null)}
+        >
+          {flash.icon}
+        </div>
       )}
 
       <div
