@@ -60,7 +60,9 @@ pub fn run() {
 
             // Before the state, so that anything going wrong while it is
             // built is written down rather than lost.
-            init_logging(&app_data_dir(app.handle()));
+            if let Some(logs) = init_logging(&app_data_dir(app.handle())) {
+                log_panics(logs);
+            }
             tracing::info!(version = env!("CARGO_PKG_VERSION"), "запуск");
 
             let state = init_state(app.handle())?;
@@ -173,6 +175,38 @@ fn app_data_dir(app: &AppHandle) -> std::path::PathBuf {
     app.path()
         .app_data_dir()
         .unwrap_or_else(|_| state::resolve_data_dir())
+}
+
+/// Records panics in the log folder before the process goes down.
+///
+/// The release profile aborts on panic and is stripped of symbols, so a crash
+/// otherwise leaves nothing behind but a Windows error code — which is exactly
+/// what the first one did. The line is written straight to the file rather
+/// than through `tracing`, because the log writer is asynchronous and an abort
+/// never gives it the chance to flush.
+fn log_panics(logs_dir: std::path::PathBuf) {
+    let previous = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}", l.file(), l.line()))
+            .unwrap_or_else(|| "место неизвестно".to_string());
+        let line = format!("unix={seconds}  {location}  {info}\n");
+
+        use std::io::Write;
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(logs_dir.join("panic.log"))
+            .and_then(|mut f| f.write_all(line.as_bytes()));
+
+        tracing::error!(%location, "паника: {info}");
+        previous(info);
+    }));
 }
 
 /// Log files older than this are removed on startup.

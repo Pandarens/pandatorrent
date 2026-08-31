@@ -22,8 +22,7 @@
         "fullscreen": false,
         "center": true,
         "decorations": true,
-        "theme": "Dark",
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,SpareRendererForSitePerProcess"
+        "theme": "Dark"
       }
     ],
     "security": {
