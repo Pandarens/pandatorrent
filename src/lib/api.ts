@@ -6,6 +6,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
+  Leftover,
   AddedTorrent,
   CatalogCategory,
   ForumEntry,
@@ -290,4 +291,21 @@ export const appUpdate = {
   install: () => invoke<void>('app_update_install'),
   onProgress: (cb: (percent: number) => void) =>
     listen<number>('app-update:progress', (e) => cb(e.payload)),
+}
+
+// ------------------------------------------------------- unfinished viewings
+
+export const leftovers = {
+  list: () => invoke<Leftover[]>('leftovers_list'),
+  resume: (infoHash: string) => invoke<void>('leftover_resume', { infoHash }),
+  drop: (infoHash: string) => invoke<void>('leftover_drop', { infoHash }),
+  /** Moves it into the download folder; resolves to where it landed. */
+  save: (infoHash: string) => invoke<string>('leftover_save', { infoHash }),
+}
+
+// ------------------------------------------------------------------- power
+
+export const power = {
+  shutdown: () => invoke<void>('system_shutdown'),
+  cancel: () => invoke<void>('system_shutdown_cancel'),
 }

@@ -150,6 +150,12 @@ pub fn run() {
             commands::settings::settings_mirrors,
             commands::settings::app_info,
             commands::settings::logs_open,
+            commands::leftovers::leftovers_list,
+            commands::leftovers::leftover_resume,
+            commands::leftovers::leftover_drop,
+            commands::leftovers::leftover_save,
+            commands::power::system_shutdown,
+            commands::power::system_shutdown_cancel,
             commands::app_update::app_update_check,
             commands::app_update::app_update_install,
             commands::player::player_status,
@@ -163,8 +169,13 @@ pub fn run() {
             commands::player::history_remove,
             commands::player::history_clear,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                release_temp_watch(app);
+            }
+        });
 }
 
 /// Where application data lives.
@@ -260,24 +271,48 @@ fn prune_old_logs(dir: &std::path::Path) {
     }
 }
 
-/// Clears out "watch online" leftovers from a previous run.
+/// Sorts out what a previous run left in the stream cache.
 ///
-/// Deleting the cache folder takes the files, but the torrent itself lived on
-/// in the engine session and in the database. A viewing interrupted by closing
-/// the application therefore came back as a phantom download pointing at files
-/// that no longer exist — re-checking itself on every launch and sitting in the
-/// list as something the viewer never downloaded.
-fn drop_stream_leftovers(db: &Db, engine: &Arc<Engine>, cache: &std::path::Path) {
+/// A viewing whose files are gone is a phantom: it used to come back as a
+/// download pointing at nothing, re-checking itself on every launch. Those are
+/// dropped without ceremony.
+///
+/// A viewing whose files are still there is left exactly as it is, and the
+/// interface offers it back. Deleting it silently would throw away a
+/// part-downloaded film that somebody restarted their computer intending to
+/// finish.
+fn tidy_stream_cache(db: &Db, engine: &Arc<Engine>, cache: &std::path::Path) {
     let Ok(rows) = db.list_torrents() else {
         return;
     };
+
+    let mut keep: HashSet<String> = HashSet::new();
+
     for row in rows
         .into_iter()
         .filter(|r| std::path::Path::new(&r.output_folder).starts_with(cache))
     {
-        tracing::info!(name = %row.name, "убираем незакрытый просмотр");
-        // `forget` rather than `delete`: the files went with the folder, and
-        // asking the engine to remove them again only produces noise.
+        let details = engine.details(&row.info_hash).ok();
+        let folders: Vec<String> = details
+            .as_ref()
+            .map(|d| {
+                d.files
+                    .iter()
+                    .filter_map(|f| f.components.first().cloned())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let on_disk = folders.iter().any(|name| cache.join(name).exists());
+        if on_disk {
+            keep.extend(folders);
+            tracing::info!(name = %row.name, "просмотр с прошлого раза ждёт решения");
+            continue;
+        }
+
+        tracing::info!(name = %row.name, "убираем просмотр без файлов");
+        // `forget` rather than `delete`: there is nothing left to delete, and
+        // asking the engine to remove missing files only produces noise.
         if let Err(e) = tauri::async_runtime::block_on(engine.forget(&row.info_hash)) {
             tracing::warn!("не удалось убрать просмотр из сессии: {e}");
         }
@@ -285,6 +320,48 @@ fn drop_stream_leftovers(db: &Db, engine: &Arc<Engine>, cache: &std::path::Path)
             tracing::warn!("не удалось убрать просмотр из базы: {e}");
         }
     }
+
+    // Whatever is in the cache and belongs to no torrent is debris from a run
+    // that ended badly, and nothing will ever ask for it again.
+    let Ok(entries) = std::fs::read_dir(cache) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if keep.contains(&name) {
+            continue;
+        }
+        let path = entry.path();
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
+        if let Err(e) = removed {
+            tracing::warn!("не удалось убрать остаток кэша {}: {e}", path.display());
+        }
+    }
+}
+
+/// Frees the viewing in progress when the application closes.
+///
+/// Waiting for the grace period is pointless once there is nobody left to come
+/// back to it, and leaving it behind is what turns a scratch copy into
+/// gigabytes nobody asked to keep.
+fn release_temp_watch(app: &AppHandle) {
+    let Some(state) = app.try_state::<Arc<AppState>>() else {
+        return;
+    };
+    let Some(watch) = state.temp_watch.lock().take() else {
+        return;
+    };
+    tracing::info!(info_hash = %watch.info_hash, "освобождаем просмотр при выходе");
+    let engine = state.engine.clone();
+    let hash = watch.info_hash.clone();
+    if let Err(e) = tauri::async_runtime::block_on(engine.delete(&hash)) {
+        tracing::warn!("не удалось освободить просмотр при выходе: {e}");
+    }
+    let _ = state.db.delete_torrent(&hash);
 }
 
 fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
@@ -311,15 +388,7 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
         cfg.network.tracker_proxy.as_deref(),
     )?);
 
-    // Anything left in the stream cache belongs to a previous run and will
-    // never be resumed, so the cheapest correct thing is to drop it at start.
-    let cache = data_dir.join("cache").join("stream");
-    if cache.exists() {
-        if let Err(e) = std::fs::remove_dir_all(&cache) {
-            tracing::warn!("could not clear the stream cache: {e}");
-        }
-    }
-    drop_stream_leftovers(&db, &engine, &cache);
+    tidy_stream_cache(&db, &engine, &data_dir.join("cache").join("stream"));
 
     let streams = Arc::new(tauri::async_runtime::block_on(StreamServer::start(
         engine.clone(),

@@ -591,6 +591,46 @@ export function SettingsView() {
       </div>
 
       <div className="card">
+        <h3 className="card-title">Выключение компьютера</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          Перед выключением появится обратный отсчёт — любая клавиша или клик его
+          отменяют. По умолчанию выключено: приложение не должно гасить компьютер
+          неожиданно.
+        </p>
+
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.power.afterPlayback}
+            onChange={(e) => patch((d) => (d.power.afterPlayback = e.target.checked))}
+          />
+          <span>Выключать после того, как фильм или сезон досмотрен</span>
+        </label>
+
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.power.afterDownloads}
+            onChange={(e) => patch((d) => (d.power.afterDownloads = e.target.checked))}
+          />
+          <span>Выключать после того, как все загрузки завершены</span>
+        </label>
+
+        <label className="field" style={{ maxWidth: 280, marginTop: 10 }}>
+          <span>Сколько ждать перед выключением, секунд</span>
+          <input
+            type="number"
+            min={10}
+            max={600}
+            value={draft.power.delaySeconds}
+            onChange={(e) =>
+              patch((d) => (d.power.delaySeconds = Math.max(10, Number(e.target.value) || 60)))
+            }
+          />
+        </label>
+      </div>
+
+      <div className="card">
         <h3 className="card-title">Журнал работы</h3>
         <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
           Приложение записывает, что оно делает, в файл. Если что-то пошло не так,

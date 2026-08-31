@@ -287,6 +287,34 @@ pub struct AppConfig {
     pub ui: UiConfig,
     pub home: HomeConfig,
     pub player: PlayerConfig,
+    #[serde(default)]
+    pub power: PowerConfig,
+}
+
+/// Turning the computer off once there is nothing left to wait for.
+///
+/// Both switches are off unless asked for: nothing about a torrent client
+/// should ever shut a machine down by surprise. Even switched on, the shutdown
+/// is announced with a countdown that any key or click calls off.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PowerConfig {
+    /// After the last episode of what is playing has finished.
+    pub after_playback: bool,
+    /// After every download has finished.
+    pub after_downloads: bool,
+    /// How long the countdown runs before it happens.
+    pub delay_seconds: u32,
+}
+
+impl Default for PowerConfig {
+    fn default() -> Self {
+        Self {
+            after_playback: false,
+            after_downloads: false,
+            delay_seconds: 60,
+        }
+    }
 }
 
 impl Default for AppConfig {
@@ -299,6 +327,7 @@ impl Default for AppConfig {
             ui: UiConfig::default(),
             home: HomeConfig::default(),
             player: PlayerConfig::default(),
+            power: PowerConfig::default(),
         }
     }
 }

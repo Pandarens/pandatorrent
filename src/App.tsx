@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { Sidebar, type ViewId } from './components/Sidebar'
+import { LeftoverWatches } from './components/LeftoverWatches'
+import { ShutdownCountdown } from './components/ShutdownCountdown'
 import { Toasts } from './components/ui'
 import { UpdateModal } from './components/UpdateModal'
+import { onProgress, power as powerApi } from './lib/api'
 import { StoreProvider, useStore } from './lib/store'
 import type { TopicUpdate } from './lib/types'
 import { DownloadsView } from './views/DownloadsView'
@@ -20,7 +23,7 @@ export default function App() {
 }
 
 function Shell() {
-  const { pendingUpdates } = useStore()
+  const { pendingUpdates, config } = useStore()
   const [view, setView] = useState<ViewId>('library')
   const [selectedHash, setSelectedHash] = useState<string | null>(null)
 
@@ -45,6 +48,28 @@ function Shell() {
     setView('library')
   }
 
+  // Turning the machine off once every download is done. Armed only from
+  // settings, and only after something was actually downloading — otherwise
+  // opening the application with nothing to do would count as "finished".
+  const [shutdownReason, setShutdownReason] = useState<string | null>(null)
+  const wasBusy = useRef(false)
+
+  useEffect(() => {
+    const un = onProgress((list) => {
+      if (list.some((p) => !p.finished)) {
+        wasBusy.current = true
+        return
+      }
+      if (wasBusy.current && list.length > 0 && config?.power.afterDownloads) {
+        wasBusy.current = false
+        setShutdownReason('Все загрузки завершены')
+      }
+    })
+    return () => {
+      void un.then((f) => f())
+    }
+  }, [config?.power.afterDownloads])
+
   return (
     <div className="app">
       <Sidebar
@@ -58,6 +83,7 @@ function Shell() {
       />
 
       <main className="content">
+        <LeftoverWatches />
         {view === 'library' && (
           <LibraryView selectedHash={selectedHash} onSelect={setSelectedHash} />
         )}
@@ -68,6 +94,17 @@ function Shell() {
       </main>
 
       {prompt && <UpdateModal update={prompt} onClose={() => setPrompt(null)} />}
+
+      {shutdownReason && (
+        <ShutdownCountdown
+          seconds={config?.power.delaySeconds ?? 60}
+          reason={shutdownReason}
+          onCancel={() => {
+            setShutdownReason(null)
+            void powerApi.cancel()
+          }}
+        />
+      )}
 
       <Toasts />
     </div>

@@ -1,6 +1,8 @@
 pub mod app_update;
 pub mod library;
+pub mod leftovers;
 pub mod player;
+pub mod power;
 pub mod settings;
 pub mod torrents;
 pub mod tracker;

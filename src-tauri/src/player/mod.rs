@@ -113,6 +113,8 @@ pub struct Playback {
     pub speed: Option<f64>,
     /// Subtitle offset in seconds, for a release where they run early or late.
     pub sub_delay: Option<f64>,
+    /// The playlist has run out — the film, or the season, is over.
+    pub finished: bool,
 }
 
 /// The names to put on screen for what is currently open.
@@ -419,6 +421,12 @@ impl Player {
                 .get_property("track-list")
                 .map(|raw| parse_tracks(&raw))
                 .unwrap_or_default(),
+            // `idle-active` is mpv sitting with nothing left to play, which is
+            // what the end of a film looks like from the outside.
+            finished: player
+                .get_property("idle-active")
+                .map(|v| v == "yes")
+                .unwrap_or(false),
             speed: player.get_property("speed").and_then(|v| v.parse().ok()),
             sub_delay: player.get_property("sub-delay").and_then(|v| v.parse().ok()),
             position: player.get_property("time-pos").and_then(|v| v.parse().ok()),

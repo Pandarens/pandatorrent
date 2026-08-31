@@ -2416,3 +2416,73 @@ body:has(.pw) {
 .strip-arrow:hover {
   color: var(--accent, #57c26a);
 }
+
+/* The "something was left half-watched" notice. */
+.banner.leftover {
+  align-items: center;
+  gap: 12px;
+}
+
+.leftover-text {
+  min-width: 0;
+}
+
+.leftover-title {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leftover-sub {
+  color: var(--muted, #9aa3ad);
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
+/* The shutdown warning: unmissable on purpose. */
+.shutdown-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 11, 0.72);
+}
+
+.shutdown-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 36px;
+  border-radius: 16px;
+  background: #12151c;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  text-align: center;
+}
+
+.shutdown-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.shutdown-reason {
+  color: var(--muted, #9aa3ad);
+  font-size: 13px;
+  max-width: 340px;
+}
+
+.shutdown-count {
+  font-size: 46px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.shutdown-hint {
+  color: var(--muted, #9aa3ad);
+  font-size: 12px;
+  margin-bottom: 4px;
+}

@@ -13,7 +13,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 
-import { player as playerApi, settings as settingsApi } from './lib/api'
+import { player as playerApi, power as powerApi, settings as settingsApi } from './lib/api'
+import { ShutdownCountdown } from './components/ShutdownCountdown'
 import { formatBytes, formatSpeed } from './lib/format'
 import type { AppConfig, Playback, Track } from './lib/types'
 
@@ -60,6 +61,7 @@ export function PlayerWindow() {
   // Which pop-out panel is open, if any. One at a time: they occupy the same
   // corner and two of them at once would just cover the film.
   const [panel, setPanel] = useState<'tracks' | 'episodes' | null>(null)
+  const [shuttingDown, setShuttingDown] = useState(false)
   // A brief icon shown where the pointer expects it, the way every other
   // player acknowledges a click on the picture.
   const [flash, setFlash] = useState<{ icon: string; id: number } | null>(null)
@@ -290,6 +292,11 @@ export function PlayerWindow() {
     void toggleFullscreen()
   }, [])
 
+  // The season has played out. Only offered if it was asked for in settings.
+  useEffect(() => {
+    if (state?.finished && config?.power.afterPlayback) setShuttingDown(true)
+  }, [state?.finished, config?.power.afterPlayback])
+
   const loading = !state || duration <= 0
   // mpv reports the stream URL as its media title, so the readable name comes
   // from the app instead; the episode file name is added only when there is a
@@ -350,6 +357,17 @@ export function PlayerWindow() {
             onMouseDown={() => appWindow.startResizeDragging('SouthWest')}
           />
         </>
+      )}
+
+      {shuttingDown && (
+        <ShutdownCountdown
+          seconds={config?.power.delaySeconds ?? 60}
+          reason="Просмотр закончен"
+          onCancel={() => {
+            setShuttingDown(false)
+            void powerApi.cancel()
+          }}
+        />
       )}
 
       {/* The picture itself. Sits under everything else, so the controls,

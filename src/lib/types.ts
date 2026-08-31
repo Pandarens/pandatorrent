@@ -323,6 +323,8 @@ export interface Playback {
   speed: number | null
   /** Subtitle offset in seconds. */
   subDelay: number | null
+  /** The playlist has run out — the film, or the season, is over. */
+  finished: boolean
   /** Current episode index within the playlist. */
   playlistPos: number | null
   playlistCount: number | null
@@ -383,6 +385,13 @@ export interface UiConfig {
   searchView: string
 }
 
+/** Turning the computer off once there is nothing left to wait for. */
+export interface PowerConfig {
+  afterPlayback: boolean
+  afterDownloads: boolean
+  delaySeconds: number
+}
+
 export interface AppConfig {
   downloadDir: string
   network: NetworkConfig
@@ -391,6 +400,7 @@ export interface AppConfig {
   ui: UiConfig
   home: HomeConfig
   player: PlayerConfig
+  power: PowerConfig
 }
 
 export interface SettingsUpdate {
@@ -426,4 +436,14 @@ export interface AppInfo {
   coversDir: string
   /** Folder holding the log files. */
   logsDir: string
+}
+
+/** An unfinished "watch online" download left by a previous run. */
+export interface Leftover {
+  infoHash: string
+  title: string
+  topicId: number | null
+  /** How much of it is already downloaded. */
+  bytesOnDisk: number
+  totalBytes: number
 }
