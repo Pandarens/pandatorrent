@@ -304,7 +304,9 @@ pub async fn player_watch_topic(
         .collect();
     ordered.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
 
-    let mut wanted: Vec<usize> = ordered.iter().take(2).map(|f| f.index).collect();
+    // Just the episode being opened. The sweep adds the next one once this
+    // has finished, so nothing competes with the part being watched.
+    let mut wanted: Vec<usize> = ordered.iter().take(1).map(|f| f.index).collect();
     wanted.extend(
         added
             .files
@@ -397,7 +399,27 @@ async fn narrow_to_current(
         return;
     };
 
-    let mut wanted: Vec<usize> = playlist.iter().skip(position).take(2).copied().collect();
+    // The next episode joins the selection only once this one is complete.
+    // Fetching both at once splits the bandwidth, and the half that matters is
+    // the part being watched — that is what made resuming part-way in crawl.
+    let current_complete = state
+        .engine
+        .file_progress(info_hash)
+        .ok()
+        .zip(playlist.get(position))
+        .map(|(done, &current)| {
+            let length = details
+                .files
+                .iter()
+                .find(|f| f.index == current)
+                .map(|f| f.length)
+                .unwrap_or(0);
+            length > 0 && done.get(current).copied().unwrap_or(0) >= length
+        })
+        .unwrap_or(false);
+
+    let episodes = if current_complete { 2 } else { 1 };
+    let mut wanted: Vec<usize> = playlist.iter().skip(position).take(episodes).copied().collect();
     wanted.extend(
         details
             .files

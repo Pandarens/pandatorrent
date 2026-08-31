@@ -19,9 +19,10 @@ import type { AppConfig, Playback } from './lib/types'
 
 /** Fast enough for a smooth progress bar, cheap enough to leave running. */
 const POLL_MS = 400
-// A stream that has not advanced for this long has stopped, not buffered.
-// Generous on purpose: a slow torrent legitimately pauses to fill its buffer,
-// and crying wolf over that would be worse than saying nothing.
+// A picture that has not moved for this long is waiting on data. Whether that
+// is a fault depends on whether data is still arriving — see below.
+const BUFFER_MS = 2500
+// Frozen this long with nothing arriving at all: the stream really has stopped.
 const STALL_MS = 20000
 /** How long the mouse must be still before the controls fade away. */
 const IDLE_MS = 2600
@@ -49,7 +50,7 @@ export function PlayerWindow() {
   const [active, setActive] = useState(true)
   const [hovering, setHovering] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [stalled, setStalled] = useState(false)
+  const [frozenFor, setFrozenFor] = useState(0)
   const progressRef = useRef({ position: -1, since: 0 })
   const [onTop, setOnTop] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -95,14 +96,11 @@ export function PlayerWindow() {
         // nothing else says so.
         const running = next && !next.paused && (next.duration ?? 0) > 0
         const position = next?.position ?? 0
-        if (!running) {
+        if (!running || Math.abs(position - progressRef.current.position) > 0.25) {
           progressRef.current = { position, since: now }
-          setStalled(false)
-        } else if (Math.abs(position - progressRef.current.position) > 0.25) {
-          progressRef.current = { position, since: now }
-          setStalled(false)
-        } else if (now - progressRef.current.since > STALL_MS) {
-          setStalled(true)
+          setFrozenFor(0)
+        } else {
+          setFrozenFor(now - progressRef.current.since)
         }
 
         // Adopt the reported values only once the user has let go.
@@ -200,10 +198,17 @@ export function PlayerWindow() {
   // which is exactly what is needed after it has gone quiet.
   const retry = useCallback(async () => {
     const at = Math.max(0, (state?.position ?? 0) - 1)
-    setStalled(false)
+    setFrozenFor(0)
     progressRef.current = { position: -1, since: Date.now() }
     await playerApi.seekTo(at).catch(() => {})
   }, [state])
+
+  // Standing still while pieces are still arriving is buffering, and saying
+  // "the stream stopped" there is simply wrong — it is the normal cost of
+  // jumping to a part of the film that has not been downloaded yet.
+  const downloading = (state?.downloadSpeedBps ?? 0) > 0
+  const buffering = frozenFor > BUFFER_MS && downloading
+  const stalled = frozenFor > STALL_MS && !downloading
 
   const loading = !state || duration <= 0
   // mpv reports the stream URL as its media title, so the readable name comes
@@ -350,6 +355,22 @@ export function PlayerWindow() {
         </div>
       )}
       {error && <div className="pw-center pw-error">{error}</div>}
+
+      {buffering && !error && !loading && (
+        <div className="pw-center pw-stall buffering">
+          <div className="pw-loading-art">
+            <span />
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="pw-stall-title">Догружаем эту часть</div>
+          <div className="pw-stall-hint">
+            {formatSpeed(state?.downloadSpeedBps ?? 0)}
+            {state?.peers ? ` · ${state.peers} раздающих` : ''}
+          </div>
+        </div>
+      )}
 
       {stalled && !error && (
         <div className="pw-center pw-stall">

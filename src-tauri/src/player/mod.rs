@@ -180,6 +180,17 @@ impl Player {
         // to exist by now.
         player.set_option("wid", &hwnd_value.to_string())?;
         player.set_option("title", &format!("{title} — Panda Torrent"))?;
+        // Opening straight at the resume point, rather than opening at the
+        // beginning and seeking afterwards. The seek worked, but mpv had
+        // already asked for the first bytes of the film by then — downloading
+        // an opening nobody was going to watch, and competing with the part
+        // that was.
+        if let Some(seconds) = opening.resume_at {
+            if let Err(e) = player.set_option("start", &format!("{seconds:.0}")) {
+                tracing::warn!("не удалось открыть с сохранённой позиции: {e}");
+            }
+        }
+
         for (name, value) in cfg.mpv_options() {
             // A rejected option must never stop the film from playing.
             if let Err(e) = player.set_option(&name, &value) {
@@ -304,18 +315,25 @@ impl Player {
                         tracing::warn!("не удалось подключить субтитры {path}: {e}");
                     }
                 }
-                if let Some(seconds) = opening.resume_at {
-                    tracing::info!(seconds, "продолжаем с сохранённой позиции");
-                    let _ = me.command(&[
-                        "seek".to_string(),
-                        seconds.to_string(),
-                        "absolute".to_string(),
-                    ]);
+                if opening.resume_at.is_some() {
+                    // The file is open at the right place now. Clearing this
+                    // keeps the next episode from starting part-way in too,
+                    // since the option applies to every file in the playlist.
+                    let _ = me.set_property("start", "none");
                 }
                 return;
             }
             tracing::warn!("файл так и не открылся — субтитры и позиция не применены");
         });
+    }
+
+    /// Sets one mpv property on the running player, if there is one.
+    fn set_property(&self, name: &str, value: &str) -> bool {
+        let guard = self.instance.lock();
+        match guard.as_ref() {
+            Some(player) => player.set_property(name, value).is_ok(),
+            None => false,
+        }
     }
 
     pub fn playback(&self) -> Option<Playback> {

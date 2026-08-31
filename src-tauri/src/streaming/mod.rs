@@ -22,6 +22,8 @@ use axum::routing::get;
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
+use std::collections::HashMap;
+
 use tokio_util::sync::CancellationToken;
 
 use crate::engine::Engine;
@@ -49,13 +51,18 @@ pub struct StreamServer {
     token: String,
     /// Cancels every in-flight response, e.g. when the player is closed.
     cancel: Arc<parking_lot::Mutex<CancellationToken>>,
+    active: ActiveReaders,
 }
+
+/// The reader currently serving each file, so a new one can retire it.
+type ActiveReaders = Arc<parking_lot::Mutex<HashMap<(String, usize), CancellationToken>>>;
 
 #[derive(Clone)]
 struct ServerState {
     engine: Arc<Engine>,
     token: String,
     cancel: Arc<parking_lot::Mutex<CancellationToken>>,
+    active: ActiveReaders,
 }
 
 #[derive(Deserialize)]
@@ -68,10 +75,12 @@ impl StreamServer {
     pub async fn start(engine: Arc<Engine>) -> AppResult<Self> {
         let token = random_token();
         let cancel = Arc::new(parking_lot::Mutex::new(CancellationToken::new()));
+        let active: ActiveReaders = Arc::new(parking_lot::Mutex::new(HashMap::new()));
         let state = ServerState {
             engine,
             token: token.clone(),
             cancel: cancel.clone(),
+            active: active.clone(),
         };
 
         let app = axum::Router::new()
@@ -98,6 +107,7 @@ impl StreamServer {
             port,
             token,
             cancel,
+            active,
         })
     }
 
@@ -121,6 +131,7 @@ impl StreamServer {
     /// Called when playback stops: without it, teardown waits on a read that is
     /// still expecting torrent pieces, which is what made closing feel slow.
     pub fn abort_all(&self) {
+        self.active.lock().clear();
         let mut guard = self.cancel.lock();
         guard.cancel();
         // A fresh token, so the next playback is not born cancelled.
@@ -176,7 +187,23 @@ async fn stream_file(
     }
 
     let length = end.saturating_sub(start) + 1;
-    let cancel = state.cancel.lock().clone();
+
+    // Seeking opens a second request while the first is still being served.
+    // librqbit raises the priority of the pieces just past *every* open
+    // stream, so leaving the old one running makes it fetch for a position
+    // nobody is watching any more and splits the bandwidth two ways — which
+    // is why resuming part-way into a film crawled instead of starting.
+    let cancel = {
+        let child = state.cancel.lock().child_token();
+        let previous = state
+            .active
+            .lock()
+            .insert((info_hash.clone(), file_id), child.clone());
+        if let Some(previous) = previous {
+            previous.cancel();
+        }
+        child
+    };
     let body = Body::from_stream(cancellable_body(stream.reader.take(length), cancel));
 
     let mut resp = Response::new(body);

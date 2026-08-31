@@ -2013,6 +2013,10 @@ body:has(.pw) {
   z-index: 2;
 }
 
+.pw-stall.buffering {
+  background: rgba(8, 10, 14, 0.7);
+}
+
 .pw-stall-title {
   font-size: 15px;
   font-weight: 600;
