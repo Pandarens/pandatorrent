@@ -296,6 +296,16 @@ export interface PlayerConfig {
   extraOptions: string[]
 }
 
+/** One audio or subtitle track the file offers. */
+export interface Track {
+  id: number
+  /** 'audio' | 'sub' */
+  kind: string
+  title: string | null
+  lang: string | null
+  selected: boolean
+}
+
 /** Live playback state, driving the app's own control bar. */
 export interface Playback {
   title: string
@@ -306,6 +316,13 @@ export interface Playback {
   muted: boolean
   /** File name of the current entry, for a season. */
   episode: string | null
+  /** Every entry in the playlist, so a season can be jumped around in. */
+  episodes: string[]
+  /** Sound and subtitle tracks the file offers. */
+  tracks: Track[]
+  speed: number | null
+  /** Subtitle offset in seconds. */
+  subDelay: number | null
   /** Current episode index within the playlist. */
   playlistPos: number | null
   playlistCount: number | null

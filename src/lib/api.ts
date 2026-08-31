@@ -215,6 +215,12 @@ export const player = {
   setVolume: (volume: number) =>
     invoke<void>('player_command', { args: ['set', 'volume', String(volume)] }),
   toggleMute: () => invoke<void>('player_command', { args: ['cycle', 'mute'] }),
+  setTrack: (kind: 'aid' | 'sid', id: number | 'no') =>
+    invoke<void>('player_command', { args: ['set', kind, String(id)] }),
+  setSpeed: (speed: number) =>
+    invoke<void>('player_command', { args: ['set', 'speed', String(speed)] }),
+  setSubDelay: (seconds: number) =>
+    invoke<void>('player_command', { args: ['set', 'sub-delay', seconds.toFixed(1)] }),
   toggleFullscreen: () => invoke<void>('player_command', { args: ['cycle', 'fullscreen'] }),
   nextEpisode: () =>
     invoke<void>('player_command', { args: ['playlist-next', 'weak'] }),

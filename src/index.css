@@ -2013,6 +2013,113 @@ body:has(.pw) {
   z-index: 2;
 }
 
+.pw-panel {
+  position: absolute;
+  right: 16px;
+  bottom: 92px;
+  z-index: 3;
+  width: 320px;
+  max-height: 52vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(10, 12, 17, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
+}
+
+.pw-panel-title {
+  color: var(--muted, #9aa3ad);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 8px 0 6px;
+}
+
+.pw-panel-title:first-child {
+  margin-top: 0;
+}
+
+.pw-panel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pw-panel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pw-panel-row:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.pw-panel-row.current {
+  background: rgba(87, 194, 106, 0.16);
+  color: var(--accent, #57c26a);
+}
+
+.pw-panel-num {
+  flex: none;
+  min-width: 22px;
+  color: var(--muted, #9aa3ad);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-panel-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pw-panel-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pw-chip {
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pw-chip:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.pw-chip.current {
+  border-color: var(--accent, #57c26a);
+  color: var(--accent, #57c26a);
+}
+
+.pw-chip-value {
+  font-size: 12px;
+  color: var(--muted, #9aa3ad);
+  font-variant-numeric: tabular-nums;
+}
+
+.pw-btn.active {
+  color: var(--accent, #57c26a);
+}
+
 .pw-stall.buffering {
   background: rgba(8, 10, 14, 0.7);
 }
@@ -2120,4 +2227,46 @@ body:has(.pw) {
 .pw-episode.ready {
   color: #9fe0ac;
   background: rgba(87, 194, 106, 0.16);
+}
+
+/* Cover used as the resume button on the "continue watching" shelf. */
+.result-art.as-button {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.result-art.as-button .art-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.result-art.as-button:hover .art-play {
+  opacity: 1;
+}
+
+/* How far in the viewer got, along the bottom edge of the cover. */
+.art-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.art-progress > span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #57c26a);
 }

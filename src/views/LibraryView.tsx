@@ -8,6 +8,7 @@ import { formatBytes, formatDate, formatPlaytime, progressPercent } from '../lib
 import { useStore } from '../lib/store'
 import type { ExecutableCandidate, LibraryItem, TopicUpdate } from '../lib/types'
 import { Empty, Modal, ProgressBar, Spinner } from '../components/ui'
+import { ContinueWatching } from '../components/ContinueWatching'
 import { Wishlist } from '../components/Wishlist'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { WatchHistory } from '../components/WatchHistory'
@@ -53,7 +54,9 @@ function LibraryGrid({ onSelect }: { onSelect: (hash: string) => void }) {
   if (library.length === 0) {
     return (
       <div className="page">
-        <Wishlist onOpenGame={onSelect} />
+        <ContinueWatching />
+        <ContinueWatching />
+      <Wishlist onOpenGame={onSelect} />
         <WatchHistory />
         <Empty
           icon="🎮"

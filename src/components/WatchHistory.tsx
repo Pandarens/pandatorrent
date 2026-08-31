@@ -7,6 +7,10 @@ import { useEffect, useState } from 'react'
 
 import { history as historyApi, onHistoryUpdated, player as playerApi } from '../lib/api'
 import { formatDateTime } from '../lib/format'
+import { useStore } from '../lib/store'
+import type { WatchHistoryItem } from '../lib/types'
+import { Spinner } from './ui'
+import { ConfirmDialog } from './ConfirmDialog'
 
 /** Seconds as `1:23:45`, or `4:07` for anything under an hour. */
 function formatClock(seconds: number): string {
@@ -16,10 +20,6 @@ function formatClock(seconds: number): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return h > 0 ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`
 }
-import { useStore } from '../lib/store'
-import type { WatchHistoryItem } from '../lib/types'
-import { Spinner } from './ui'
-import { ConfirmDialog } from './ConfirmDialog'
 
 export function WatchHistory() {
   const { toast, reportError } = useStore()

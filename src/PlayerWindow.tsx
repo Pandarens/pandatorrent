@@ -15,7 +15,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import { player as playerApi, settings as settingsApi } from './lib/api'
 import { formatBytes, formatSpeed } from './lib/format'
-import type { AppConfig, Playback } from './lib/types'
+import type { AppConfig, Playback, Track } from './lib/types'
 
 /** Fast enough for a smooth progress bar, cheap enough to leave running. */
 const POLL_MS = 400
@@ -44,6 +44,12 @@ function clock(seconds: number | null | undefined): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
 }
 
+/** How a track should read in the menu: "Дубляж · rus", or a bare number. */
+function trackLabel(track: Track, index: number): string {
+  const parts = [track.title, track.lang].filter(Boolean)
+  return parts.length > 0 ? parts.join(' · ') : `Дорожка ${index + 1}`
+}
+
 export function PlayerWindow() {
   const [state, setState] = useState<Playback | null>(null)
   const [config, setConfig] = useState<AppConfig | null>(null)
@@ -51,6 +57,9 @@ export function PlayerWindow() {
   const [hovering, setHovering] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [frozenFor, setFrozenFor] = useState(0)
+  // Which pop-out panel is open, if any. One at a time: they occupy the same
+  // corner and two of them at once would just cover the film.
+  const [panel, setPanel] = useState<'tracks' | 'episodes' | null>(null)
   const progressRef = useRef({ position: -1, since: 0 })
   const [onTop, setOnTop] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -206,6 +215,12 @@ export function PlayerWindow() {
   // Standing still while pieces are still arriving is buffering, and saying
   // "the stream stopped" there is simply wrong — it is the normal cost of
   // jumping to a part of the film that has not been downloaded yet.
+  const audioTracks = (state?.tracks ?? []).filter((t) => t.kind === 'audio')
+  const subTracks = (state?.tracks ?? []).filter((t) => t.kind === 'sub')
+  const episodeNames = state?.episodes ?? []
+  const playSpeed = state?.speed ?? 1
+  const subDelay = state?.subDelay ?? 0
+
   const downloading = (state?.downloadSpeedBps ?? 0) > 0
   const buffering = frozenFor > BUFFER_MS && downloading
   const stalled = frozenFor > STALL_MS && !downloading
@@ -384,6 +399,104 @@ export function PlayerWindow() {
         </div>
       )}
 
+      {panel === 'episodes' && visible && (
+        <div className="pw-panel" onMouseEnter={() => setHovering(true)}>
+          <div className="pw-panel-title">Серии</div>
+          <div className="pw-panel-list">
+            {episodeNames.map((name, i) => (
+              <button
+                key={`${name}-${i}`}
+                className={`pw-panel-row${i === (state?.playlistPos ?? 0) ? ' current' : ''}`}
+                title={name}
+                onClick={() => {
+                  void playerApi.goToEpisode(i)
+                  setPanel(null)
+                }}
+              >
+                <span className="pw-panel-num">{i + 1}</span>
+                <span className="pw-panel-name">{name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {panel === 'tracks' && visible && (
+        <div className="pw-panel" onMouseEnter={() => setHovering(true)}>
+          {audioTracks.length > 0 && (
+            <>
+              <div className="pw-panel-title">Звук</div>
+              <div className="pw-panel-list">
+                {audioTracks.map((t, i) => (
+                  <button
+                    key={`a${t.id}`}
+                    className={`pw-panel-row${t.selected ? ' current' : ''}`}
+                    onClick={() => void playerApi.setTrack('aid', t.id)}
+                  >
+                    {trackLabel(t, i)}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          <div className="pw-panel-title">Субтитры</div>
+          <div className="pw-panel-list">
+            <button
+              className={`pw-panel-row${subTracks.every((t) => !t.selected) ? ' current' : ''}`}
+              onClick={() => void playerApi.setTrack('sid', 'no')}
+            >
+              Выключены
+            </button>
+            {subTracks.map((t, i) => (
+              <button
+                key={`s${t.id}`}
+                className={`pw-panel-row${t.selected ? ' current' : ''}`}
+                onClick={() => void playerApi.setTrack('sid', t.id)}
+              >
+                {trackLabel(t, i)}
+              </button>
+            ))}
+          </div>
+
+          <div className="pw-panel-title">Скорость</div>
+          <div className="pw-panel-row-inline">
+            {[0.75, 1, 1.25, 1.5, 2].map((v) => (
+              <button
+                key={v}
+                className={`pw-chip${Math.abs(playSpeed - v) < 0.01 ? ' current' : ''}`}
+                onClick={() => void playerApi.setSpeed(v)}
+              >
+                {v}×
+              </button>
+            ))}
+          </div>
+
+          {subTracks.some((t) => t.selected) && (
+            <>
+              <div className="pw-panel-title">Сдвиг субтитров</div>
+              <div className="pw-panel-row-inline">
+                <button
+                  className="pw-chip"
+                  title="Показывать раньше"
+                  onClick={() => void playerApi.setSubDelay(subDelay - 0.5)}
+                >
+                  −0,5 с
+                </button>
+                <span className="pw-chip-value">{subDelay.toFixed(1)} с</span>
+                <button
+                  className="pw-chip"
+                  title="Показывать позже"
+                  onClick={() => void playerApi.setSubDelay(subDelay + 0.5)}
+                >
+                  +0,5 с
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       <div
         className="pw-bottom"
         onMouseEnter={() => setHovering(true)}
@@ -451,6 +564,23 @@ export function PlayerWindow() {
               ⏭
             </button>
           )}
+
+          {episodeNames.length > 1 && (
+            <button
+              className={`pw-btn${panel === 'episodes' ? ' active' : ''}`}
+              title="Список серий"
+              onClick={() => setPanel(panel === 'episodes' ? null : 'episodes')}
+            >
+              ☰
+            </button>
+          )}
+          <button
+            className={`pw-btn${panel === 'tracks' ? ' active' : ''}`}
+            title="Звук, субтитры, скорость"
+            onClick={() => setPanel(panel === 'tracks' ? null : 'tracks')}
+          >
+            ⚙
+          </button>
 
           <div className="pw-grow" />
 

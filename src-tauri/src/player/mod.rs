@@ -45,6 +45,50 @@ pub struct PlayerStatus {
     pub problem: Option<String>,
 }
 
+/// One audio or subtitle track the file offers.
+///
+/// Tracker releases routinely carry several dubs — дубляж, многоголосый,
+/// оригинал — and picking between them is the thing a viewer reaches for most.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Track {
+    pub id: i64,
+    /// `audio` or `sub`.
+    pub kind: String,
+    pub title: Option<String>,
+    pub lang: Option<String>,
+    pub selected: bool,
+}
+
+/// Reads mpv's track list, which it hands over as JSON.
+///
+/// Anything that is not sound or subtitles is dropped: the video track is not
+/// something anyone chooses between.
+fn parse_tracks(raw: &str) -> Vec<Track> {
+    let Ok(items) = serde_json::from_str::<Vec<serde_json::Value>>(raw) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|t| {
+            let kind = t.get("type")?.as_str()?;
+            if kind != "audio" && kind != "sub" {
+                return None;
+            }
+            Some(Track {
+                id: t.get("id")?.as_i64()?,
+                kind: kind.to_string(),
+                title: t.get("title").and_then(|v| v.as_str()).map(str::to_string),
+                lang: t.get("lang").and_then(|v| v.as_str()).map(str::to_string),
+                selected: t
+                    .get("selected")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
 /// What the controls display and drive.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -62,6 +106,13 @@ pub struct Playback {
     /// File name of the current entry, shown next to the release title when a
     /// season is playing.
     pub episode: Option<String>,
+    /// Every entry in the playlist, so a season can be jumped around in.
+    pub episodes: Vec<String>,
+    /// Sound and subtitle tracks the file offers.
+    pub tracks: Vec<Track>,
+    pub speed: Option<f64>,
+    /// Subtitle offset in seconds, for a release where they run early or late.
+    pub sub_delay: Option<f64>,
 }
 
 /// The names to put on screen for what is currently open.
@@ -355,10 +406,21 @@ impl Player {
             .as_ref()
             .zip(playlist_pos)
             .and_then(|(s, i)| s.names.get(i).cloned());
+        let episodes = showing
+            .as_ref()
+            .map(|s| s.names.clone())
+            .unwrap_or_default();
 
         Some(Playback {
             title,
             episode,
+            episodes,
+            tracks: player
+                .get_property("track-list")
+                .map(|raw| parse_tracks(&raw))
+                .unwrap_or_default(),
+            speed: player.get_property("speed").and_then(|v| v.parse().ok()),
+            sub_delay: player.get_property("sub-delay").and_then(|v| v.parse().ok()),
             position: player.get_property("time-pos").and_then(|v| v.parse().ok()),
             duration: player.get_property("duration").and_then(|v| v.parse().ok()),
             paused: player
@@ -489,6 +551,51 @@ pub fn is_video_file(name: &str) -> bool {
     VIDEO_EXTENSIONS
         .iter()
         .any(|ext| lower.ends_with(&format!(".{ext}")))
+}
+
+#[cfg(test)]
+mod track_tests {
+    use super::*;
+
+    // Shortened from what mpv actually returns for a dual-dub release.
+    const SAMPLE: &str = r#"[
+        {"id":1,"type":"video","selected":true},
+        {"id":1,"type":"audio","title":"Дубляж","lang":"rus","selected":true},
+        {"id":2,"type":"audio","title":"Original","lang":"eng","selected":false},
+        {"id":1,"type":"sub","lang":"rus","selected":false}
+    ]"#;
+
+    #[test]
+    fn reads_sound_and_subtitle_tracks_and_skips_the_video() {
+        let tracks = parse_tracks(SAMPLE);
+        assert_eq!(tracks.len(), 3);
+        assert!(tracks.iter().all(|t| t.kind != "video"));
+
+        let dub = &tracks[0];
+        assert_eq!(dub.kind, "audio");
+        assert_eq!(dub.title.as_deref(), Some("Дубляж"));
+        assert_eq!(dub.lang.as_deref(), Some("rus"));
+        assert!(dub.selected);
+    }
+
+    #[test]
+    fn a_track_without_a_title_is_still_offered() {
+        // Subtitles often carry only a language, and dropping them would hide
+        // the very thing the viewer is looking for.
+        let subs: Vec<_> = parse_tracks(SAMPLE)
+            .into_iter()
+            .filter(|t| t.kind == "sub")
+            .collect();
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].title, None);
+        assert_eq!(subs[0].lang.as_deref(), Some("rus"));
+    }
+
+    #[test]
+    fn nonsense_from_mpv_is_no_tracks_rather_than_a_panic() {
+        assert!(parse_tracks("not json").is_empty());
+        assert!(parse_tracks("{}").is_empty());
+    }
 }
 
 #[cfg(test)]
