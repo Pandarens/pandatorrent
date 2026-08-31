@@ -306,27 +306,22 @@ impl Player {
         }
     }
 
-    /// Drops the handle once playback has ended on its own.
+    /// Drops the handle once the player window is gone.
+    ///
+    /// The window is the signal, not `media-title`: that property goes missing
+    /// for a moment while mpv switches episodes or re-opens the stream, and
+    /// treating those moments as "closed" would tear down playback mid-film.
     pub fn reap_if_closed(&self) {
-        let closed = {
-            let guard = self.instance.lock();
-            match guard.as_ref() {
-                Some(player) => player.get_property("media-title").is_none(),
-                None => false,
-            }
-        };
-        if closed {
+        let has_window = self.app.get_webview_window(PLAYER_LABEL).is_some();
+        let has_instance = self.instance.lock().is_some();
+        if has_instance && !has_window {
             self.stop();
         }
     }
 
-    /// True while a film is on screen — used to keep temporary downloads alive.
+    /// True while a film is open — used to keep temporary downloads alive.
     pub fn is_playing(&self) -> bool {
-        let guard = self.instance.lock();
-        guard
-            .as_ref()
-            .map(|p| p.get_property("media-title").is_some())
-            .unwrap_or(false)
+        self.instance.lock().is_some() && self.app.get_webview_window(PLAYER_LABEL).is_some()
     }
 }
 

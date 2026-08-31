@@ -213,6 +213,13 @@ impl PlayerConfig {
             // treating it as a failure made playback jump to the next episode.
             // Teardown speed comes from cancelling the stream instead.
             ("network-timeout".into(), "0".into()),
+            // If the connection genuinely drops, resume it rather than calling
+            // the film finished.
+            (
+                "stream-lavf-o".into(),
+                "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=30"
+                    .into(),
+            ),
         ];
         if let Some(af) = self.audio_filter() {
             opts.push(("af".into(), af));

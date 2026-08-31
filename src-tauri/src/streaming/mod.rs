@@ -27,12 +27,14 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::Engine;
 use crate::error::{AppError, AppResult};
 
-/// How much an open-ended range serves before the player asks again.
-///
-/// librqbit prioritises the pieces just past an open stream's read position, so
-/// a longer response keeps that priority in force for longer — which is what
-/// makes playback download in order instead of scattering across the file.
-const DEFAULT_CHUNK: u64 = 64 * 1024 * 1024;
+// An open-ended range is served all the way to the end of the file, and there
+// is deliberately no cap on it. Capping it made the response finish mid-film —
+// about five minutes in at a typical bitrate — and a player cannot tell that
+// from the end of the file, so playback simply stopped.
+//
+// Serving the rest costs nothing: the reader only produces data as fast as the
+// player consumes it, and librqbit keeps prioritising the pieces just past the
+// stream position, so the download stays in order behind the playhead.
 /// How many times to retry opening a torrent that is still starting up.
 const OPEN_ATTEMPTS: usize = 10;
 const OPEN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
@@ -237,9 +239,7 @@ fn parse_range(value: &str, total: u64) -> RangeResult {
             return Some(Err(()));
         }
         let end = if to.is_empty() {
-            // An open-ended range is capped so the first request does not pull
-            // the whole file through the torrent before playback starts.
-            (start + DEFAULT_CHUNK - 1).min(total - 1)
+            total - 1
         } else {
             to.parse::<u64>().ok()?.min(total - 1)
         };
@@ -311,12 +311,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn open_ended_range_is_capped() {
-        // A player asking for "everything from 0" should not make us pull the
-        // whole film before the first frame.
+    fn open_ended_range_runs_to_the_end_of_the_file() {
+        // Regression guard: this used to stop short, and a response that ends
+        // mid-file looks to a player exactly like the end of the film.
         let (start, end) = parse_range("bytes=0-", 1_000_000_000).unwrap().unwrap();
-        assert_eq!(start, 0);
-        assert_eq!(end, DEFAULT_CHUNK - 1);
+        assert_eq!((start, end), (0, 999_999_999));
     }
 
     #[test]
