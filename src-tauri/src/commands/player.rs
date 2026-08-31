@@ -290,10 +290,21 @@ pub async fn player_watch_topic(
 
     // Only now: librqbit refuses to change the file selection while a torrent
     // is still initializing, which is what made this fail on the first click.
-    // Everything but the video is dead weight for a one-off viewing.
-    // Subtitles ride along: they are a few kilobytes, and excluding them is
-    // what left external subtitles unavailable for a streamed film.
-    let mut wanted = videos.clone();
+    // Everything but the video is dead weight for a one-off viewing, and a
+    // whole season is dead weight too: selecting every episode is exactly how
+    // "посмотреть одну серию" ended up pulling twelve onto the disk. Only the
+    // episode being opened and the one after it are wanted; the sweep below
+    // moves that window along as the viewer does.
+    //
+    // Subtitles ride along regardless: they are a few kilobytes each.
+    let mut ordered: Vec<&TorrentFileEntry> = added
+        .files
+        .iter()
+        .filter(|f| player::is_video_file(&f.name))
+        .collect();
+    ordered.sort_by(|a, b| natural_key(&a.name).cmp(&natural_key(&b.name)));
+
+    let mut wanted: Vec<usize> = ordered.iter().take(2).map(|f| f.index).collect();
     wanted.extend(
         added
             .files
@@ -369,6 +380,46 @@ async fn narrow_to_videos(state: &AppState, info_hash: &str, videos: &[usize]) {
     }
 }
 
+/// Trims a scratch download to the episode in view and the one after it.
+///
+/// librqbit downloads everything that is selected, so a season selected whole
+/// arrives whole — the streaming priority only decides what comes first, not
+/// what comes at all. Moving this window along with the viewer is what keeps
+/// "watch online" from filling the disk with episodes nobody opened.
+async fn narrow_to_current(
+    state: &AppState,
+    info_hash: &str,
+    playlist: &[usize],
+    position: usize,
+    selected: &mut Vec<usize>,
+) {
+    let Ok(details) = state.engine.details(info_hash) else {
+        return;
+    };
+
+    let mut wanted: Vec<usize> = playlist.iter().skip(position).take(2).copied().collect();
+    wanted.extend(
+        details
+            .files
+            .iter()
+            .filter(|f| player::is_subtitle_file(&f.name))
+            .map(|f| f.index),
+    );
+    wanted.sort_unstable();
+    wanted.dedup();
+
+    if wanted.is_empty() || wanted == *selected {
+        return;
+    }
+    if let Err(e) = state.engine.set_only_files(info_hash, wanted.clone()).await {
+        // Not fatal: the worst case is the old, wider selection carrying on.
+        tracing::warn!("не удалось сузить загрузку до текущей серии: {e}");
+        return;
+    }
+    tracing::info!(episode = position + 1, "загрузка сужена до текущей серии");
+    *selected = wanted;
+}
+
 /// Subtitle files in the release that belong to the given video.
 ///
 /// Matching is by name: `Film.2019.mkv` takes `Film.2019.srt` and
@@ -429,6 +480,10 @@ fn remember_and_prefetch(
     let state = state.clone();
     let info_hash = info_hash.to_string();
     tauri::async_runtime::spawn(async move {
+        // What the engine was last told to fetch, so the selection is only
+        // rewritten when it actually changes.
+        let mut selected: Vec<usize> = Vec::new();
+
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
 
@@ -447,6 +502,20 @@ fn remember_and_prefetch(
                 continue;
             };
             let position = playback.playlist_pos.unwrap_or(0);
+
+            // Only a scratch copy is trimmed. A release the viewer chose to
+            // download is theirs in full, and narrowing it would quietly
+            // cancel a download they asked for.
+            let temporary = state
+                .temp_watch
+                .lock()
+                .as_ref()
+                .map(|w| w.info_hash == info_hash)
+                .unwrap_or(false);
+            if temporary {
+                narrow_to_current(&state, &info_hash, &files, position, &mut selected).await;
+            }
+
             let (Some(&current), Some(&next)) = (files.get(position), files.get(position + 1))
             else {
                 // Nothing after this one; the prefetcher has no work left.
