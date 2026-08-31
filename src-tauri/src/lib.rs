@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 use config::AppConfig;
 use db::Db;
 use engine::Engine;
-use state::{AppState, events};
+use state::{AppState, TempWatchAction, events};
 use streaming::StreamServer;
 use trackers::rutracker::RutrackerClient;
 
@@ -291,24 +291,14 @@ fn spawn_temp_watch_reaper(state: Arc<AppState>) {
 
             {
                 let mut guard = state.temp_watch.lock();
-                match guard.as_mut() {
-                    Some(watch) if playing => {
-                        watch.last_active = std::time::Instant::now();
-                        // Resumed viewing: let it download again.
-                        if watch.paused {
-                            watch.paused = false;
-                            to_pause = Some((watch.info_hash.clone(), false));
-                        }
-                    }
-                    Some(watch) if !watch.paused => {
-                        // The player is gone: stop pulling data immediately.
-                        // Waiting out the grace period first would keep
-                        // downloading a film nobody is watching any more.
-                        watch.paused = true;
-                        to_pause = Some((watch.info_hash.clone(), true));
-                    }
-                    Some(watch) if watch.last_active.elapsed() > TEMP_WATCH_GRACE => {
-                        expired = guard.take().map(|w| w.info_hash);
+                let now = std::time::Instant::now();
+                let action = guard.as_mut().map(|w| w.sweep(now, playing, TEMP_WATCH_GRACE));
+                let info_hash = guard.as_ref().map(|w| w.info_hash.clone());
+                match (action, info_hash) {
+                    (Some(TempWatchAction::Resume), Some(h)) => to_pause = Some((h, false)),
+                    (Some(TempWatchAction::Pause), Some(h)) => to_pause = Some((h, true)),
+                    (Some(TempWatchAction::Delete), _) => {
+                        expired = guard.take().map(|w| w.info_hash)
                     }
                     _ => {}
                 }

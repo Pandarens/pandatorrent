@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 
@@ -66,6 +66,53 @@ pub struct TempWatch {
     pub paused: bool,
 }
 
+/// What to do with a temporary download on one sweep of the reaper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TempWatchAction {
+    /// Leave it exactly as it is.
+    Idle,
+    /// Viewing resumed — let it download again.
+    Resume,
+    /// The player is gone — stop pulling data, but keep the files.
+    Pause,
+    /// Closed for longer than the grace period — delete it.
+    Delete,
+}
+
+impl TempWatch {
+    /// Decides what this sweep should do, and records the decision.
+    ///
+    /// This is deliberately separate from the background loop that calls it.
+    /// The mistake worth guarding against — deciding a film is finished while
+    /// it is still on screen — is invisible inside a loop that sleeps for
+    /// twenty seconds, and obvious in a test. `playing` is the caller's answer
+    /// to "is the film still open", and everything here follows from it.
+    pub fn sweep(&mut self, now: Instant, playing: bool, grace: Duration) -> TempWatchAction {
+        if playing {
+            // Still watching: the grace period never starts, however long the
+            // film runs.
+            self.last_active = now;
+            if self.paused {
+                self.paused = false;
+                return TempWatchAction::Resume;
+            }
+            return TempWatchAction::Idle;
+        }
+
+        if !self.paused {
+            // Waiting out the grace period before pausing would keep
+            // downloading a film nobody is watching any more.
+            self.paused = true;
+            return TempWatchAction::Pause;
+        }
+
+        if now.saturating_duration_since(self.last_active) > grace {
+            return TempWatchAction::Delete;
+        }
+        TempWatchAction::Idle
+    }
+}
+
 impl AppState {
     pub fn config_snapshot(&self) -> AppConfig {
         self.config.read().clone()
@@ -114,4 +161,86 @@ pub fn db_path(data_dir: &Path) -> PathBuf {
 
 pub fn session_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("session")
+}
+
+
+#[cfg(test)]
+mod temp_watch_tests {
+    use super::*;
+
+    const GRACE: Duration = Duration::from_secs(5 * 60);
+
+    fn watch() -> TempWatch {
+        TempWatch {
+            info_hash: "abc".into(),
+            last_active: Instant::now(),
+            paused: false,
+        }
+    }
+
+    #[test]
+    fn a_film_being_watched_is_never_reaped() {
+        // The regression this exists for: a long film was torn down mid-play
+        // because the sweep decided it had been closed. As long as the player
+        // reports it open, no amount of elapsed time may delete it.
+        let mut w = watch();
+        let start = Instant::now();
+        for minute in 1..=180 {
+            let now = start + Duration::from_secs(minute * 60);
+            assert_eq!(
+                w.sweep(now, true, GRACE),
+                TempWatchAction::Idle,
+                "reaped {minute} minutes into a film that was still playing"
+            );
+        }
+    }
+
+    #[test]
+    fn closing_the_player_stops_the_download_before_deleting_it() {
+        let mut w = watch();
+        let start = Instant::now();
+
+        // First sweep after the window closes: stop pulling data, keep files.
+        assert_eq!(w.sweep(start, false, GRACE), TempWatchAction::Pause);
+        // Inside the grace period nothing more happens.
+        assert_eq!(
+            w.sweep(start + Duration::from_secs(60), false, GRACE),
+            TempWatchAction::Idle
+        );
+        // Past it, the files go.
+        assert_eq!(
+            w.sweep(start + GRACE + Duration::from_secs(1), false, GRACE),
+            TempWatchAction::Delete
+        );
+    }
+
+    #[test]
+    fn reopening_the_film_revives_it_and_restarts_the_clock() {
+        let mut w = watch();
+        let start = Instant::now();
+        assert_eq!(w.sweep(start, false, GRACE), TempWatchAction::Pause);
+
+        // Reopened four minutes later — inside the grace period.
+        let reopened = start + Duration::from_secs(4 * 60);
+        assert_eq!(w.sweep(reopened, true, GRACE), TempWatchAction::Resume);
+
+        // The clock restarted, so the original deadline no longer applies.
+        assert_eq!(
+            w.sweep(start + GRACE + Duration::from_secs(1), false, GRACE),
+            TempWatchAction::Pause
+        );
+    }
+
+    #[test]
+    fn a_brief_hiccup_in_the_playing_signal_does_not_delete_anything() {
+        // The player briefly reporting "not playing" costs at most a pause,
+        // which the next sweep undoes.
+        let mut w = watch();
+        let start = Instant::now();
+        assert_eq!(w.sweep(start, false, GRACE), TempWatchAction::Pause);
+        assert_eq!(
+            w.sweep(start + Duration::from_secs(20), true, GRACE),
+            TempWatchAction::Resume
+        );
+    }
 }
