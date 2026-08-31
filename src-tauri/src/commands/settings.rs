@@ -32,10 +32,15 @@ pub async fn settings_mirrors() -> AppResult<Vec<String>> {
 
 #[tauri::command]
 pub async fn settings_set(
+    app: AppHandle,
     state: State<'_, Arc<AppState>>,
     config: AppConfig,
 ) -> AppResult<SettingsUpdate> {
     let previous = state.config_snapshot();
+
+    if previous.ui.autostart != config.ui.autostart {
+        crate::apply_autostart(&app, config.ui.autostart);
+    }
 
     let restart_required = previous.network.listen_port != config.network.listen_port
         || previous.network.enable_dht != config.network.enable_dht

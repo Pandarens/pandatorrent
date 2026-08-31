@@ -396,6 +396,8 @@ export interface PowerConfig {
 export interface SeedingConfig {
   /** Stop after uploading this much relative to the size; 0 means never. */
   ratioLimit: number
+  /** Stop the moment a download completes, without giving anything back. */
+  stopWhenDone: boolean
 }
 
 export interface AppConfig {

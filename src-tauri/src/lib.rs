@@ -49,6 +49,12 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // `--minimised` is how the Windows autostart entry asks for a quiet
+        // launch: straight to the tray, no window in the face at login.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--minimised"]),
+        ))
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -67,6 +73,7 @@ pub fn run() {
 
             let state = init_state(app.handle())?;
             app.manage(state.clone());
+            let state_for_boot = state.clone();
 
             setup_tray(app.handle())?;
             spawn_progress_emitter(app.handle().clone(), state.clone());
@@ -76,6 +83,17 @@ pub fn run() {
             // Launched by double-clicking a .torrent or a magnet link.
             let argv: Vec<String> = std::env::args().collect();
             open_from_arguments(app.handle(), &argv);
+
+            apply_autostart(app.handle(), state_for_boot.config.read().ui.autostart);
+
+            // Started by Windows at login, or asked to keep out of the way.
+            let quiet = argv.iter().any(|a| a == "--minimised")
+                || state_for_boot.config.read().ui.start_minimized;
+            if quiet {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
             updates::spawn_watcher(app.handle().clone(), state);
 
             Ok(())
@@ -418,7 +436,7 @@ async fn stop_over_seeded(
     stopped: &mut HashSet<String>,
 ) {
     let seeding = state.config.read().seeding.clone();
-    if seeding.ratio_limit <= 0.0 {
+    if !seeding.is_active() {
         // The limit can be lifted while running, and then everything paused
         // for it should be free to start again.
         stopped.clear();
@@ -435,12 +453,30 @@ async fn stop_over_seeded(
         stopped.insert(p.info_hash.clone());
         tracing::info!(
             name = p.name.as_deref().unwrap_or("раздача"),
-            "рейтинг набран, раздача остановлена"
+            "раздача остановлена по настройке"
         );
         if let Err(e) = state.engine.pause(&p.info_hash).await {
             tracing::warn!("не удалось остановить раздачу: {e}");
             stopped.remove(&p.info_hash);
         }
+    }
+}
+
+/// Registers or removes the "start with Windows" entry.
+///
+/// Best effort: a machine that refuses the registry write is not a reason to
+/// fail the launch, but it is a reason to say so in the log.
+pub fn apply_autostart(app: &AppHandle, wanted: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+
+    let manager = app.autolaunch();
+    let result = if wanted {
+        manager.enable()
+    } else {
+        manager.disable()
+    };
+    if let Err(e) = result {
+        tracing::warn!("не удалось изменить автозапуск: {e}");
     }
 }
 

@@ -300,13 +300,19 @@ pub struct SeedingConfig {
     /// Stop once this much has been uploaded relative to the size. Zero means
     /// seed indefinitely, which is what a tracker would rather you did.
     pub ratio_limit: f64,
+    /// Stop the moment a download completes, without giving anything back.
+    #[serde(default)]
+    pub stop_when_done: bool,
 }
 
 impl Default for SeedingConfig {
     fn default() -> Self {
         // Unlimited by default: stopping a distribution early is a decision
         // for the person with the ratio to protect, not a default to inherit.
-        Self { ratio_limit: 0.0 }
+        Self {
+            ratio_limit: 0.0,
+            stop_when_done: false,
+        }
     }
 }
 
@@ -316,10 +322,18 @@ impl SeedingConfig {
     /// A torrent of unknown size cannot have a ratio, and a limit of zero is
     /// the way to say "keep seeding" — both mean the answer is no.
     pub fn should_stop(&self, uploaded: u64, total: u64) -> bool {
+        if self.stop_when_done {
+            return true;
+        }
         if self.ratio_limit <= 0.0 || total == 0 {
             return false;
         }
         uploaded as f64 / total as f64 >= self.ratio_limit
+    }
+
+    /// Whether any rule is in force at all.
+    pub fn is_active(&self) -> bool {
+        self.stop_when_done || self.ratio_limit > 0.0
     }
 }
 
@@ -393,7 +407,27 @@ mod seeding_tests {
     use super::SeedingConfig;
 
     fn limit(ratio: f64) -> SeedingConfig {
-        SeedingConfig { ratio_limit: ratio }
+        SeedingConfig {
+            ratio_limit: ratio,
+            stop_when_done: false,
+        }
+    }
+
+    #[test]
+    fn stopping_when_done_ignores_the_ratio_entirely() {
+        // "Do not seed" means exactly that: nothing given back, whatever the
+        // ratio setting happens to say.
+        let cfg = SeedingConfig {
+            ratio_limit: 5.0,
+            stop_when_done: true,
+        };
+        assert!(cfg.should_stop(0, 1_000));
+        assert!(cfg.is_active());
+    }
+
+    #[test]
+    fn no_rules_means_nothing_is_ever_stopped() {
+        assert!(!SeedingConfig::default().is_active());
     }
 
     #[test]

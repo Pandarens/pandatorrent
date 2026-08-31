@@ -588,6 +588,24 @@ export function SettingsView() {
           />
           <span>Сворачивать в трей вместо закрытия (раздача продолжается)</span>
         </label>
+
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.ui.autostart}
+            onChange={(e) => patch((d) => (d.ui.autostart = e.target.checked))}
+          />
+          <span>Запускать вместе с Windows</span>
+        </label>
+
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.ui.startMinimized}
+            onChange={(e) => patch((d) => (d.ui.startMinimized = e.target.checked))}
+          />
+          <span>Запускаться сразу в трей, без окна</span>
+        </label>
       </div>
 
       <div className="card">
@@ -597,7 +615,16 @@ export function SettingsView() {
           Можно остановить раздачу, когда отдано достаточно. Ноль означает
           раздавать без ограничения.
         </p>
-        <label className="field" style={{ maxWidth: 280 }}>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.seeding.stopWhenDone}
+            onChange={(e) => patch((d) => (d.seeding.stopWhenDone = e.target.checked))}
+          />
+          <span>Не раздавать: останавливать сразу после скачивания</span>
+        </label>
+
+        <label className="field" style={{ maxWidth: 280, marginTop: 10 }}>
           <span>Остановить при рейтинге</span>
           <input
             type="number"
@@ -605,6 +632,7 @@ export function SettingsView() {
             max={100}
             step={0.1}
             value={draft.seeding.ratioLimit}
+            disabled={draft.seeding.stopWhenDone}
             onChange={(e) =>
               patch((d) => (d.seeding.ratioLimit = Math.max(0, Number(e.target.value) || 0)))
             }
