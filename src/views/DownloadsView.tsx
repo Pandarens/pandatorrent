@@ -160,6 +160,16 @@ function TorrentRow({
           )}
           <button
             className="btn sm"
+            disabled={busy || state === 'initializing'}
+            title="Проверить файлы на диске"
+            onClick={() =>
+              act(() => torrentsApi.recheck(torrent.infoHash), 'Проверяю файлы')
+            }
+          >
+            ✓
+          </button>
+          <button
+            className="btn sm"
             disabled={busy}
             onClick={() => act(() => torrentsApi.openFolder(torrent.infoHash))}
           >

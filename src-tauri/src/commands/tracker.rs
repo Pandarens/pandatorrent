@@ -397,6 +397,10 @@ pub async fn rutracker_download(
             AddSource::Bytes(bytes.clone()),
             AddOptions {
                 output_folder,
+                // Files already on disk are hashed and counted, the way any
+                // torrent client behaves. Without this, adding a release that
+                // is already downloaded started it again from nothing.
+                overwrite: true,
                 ..Default::default()
             },
         )

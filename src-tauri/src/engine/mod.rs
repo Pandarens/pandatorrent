@@ -79,8 +79,12 @@ pub struct AddOptions {
     pub paused: bool,
     /// Restrict the download to these file indices; `None` means all files.
     pub only_files: Option<Vec<usize>>,
-    /// Reuse files already on disk instead of erroring out. Set when replacing
-    /// a torrent with an updated release, where most pieces are unchanged.
+    /// Reuse files already on disk instead of refusing to add the torrent.
+    ///
+    /// This is what every torrent client does: the existing files are hashed
+    /// against the piece list, whatever matches counts as downloaded, and only
+    /// the rest is fetched. Adding with this off meant a release already on
+    /// disk started again from nothing.
     pub overwrite: bool,
 }
 
@@ -191,6 +195,52 @@ impl Engine {
             handle.name(),
             stats,
         ))
+    }
+
+    /// The original `.torrent` of something already in the session.
+    ///
+    /// Needed to re-add a torrent, which is how a re-check is done: librqbit
+    /// has no re-check of its own, and hashing the files is exactly what it
+    /// does when a torrent is added onto files that are already there.
+    pub fn torrent_bytes(&self, info_hash: &str) -> Option<Vec<u8>> {
+        let idx = parse_id(info_hash).ok()?;
+        let handle = self.session.get(idx)?;
+        let metadata = handle.metadata.load_full()?;
+        Some(metadata.torrent_bytes.to_vec())
+    }
+
+    /// Re-hashes a torrent's files against the piece list.
+    ///
+    /// Implemented as forget-and-re-add because librqbit offers no re-check
+    /// action. The files are untouched throughout; only the bookkeeping is
+    /// rebuilt, which is the point.
+    pub async fn recheck(&self, info_hash: &str) -> AppResult<AddedTorrent> {
+        let bytes = self
+            .torrent_bytes(info_hash)
+            .ok_or_else(|| AppError::msg("торрент ещё не готов к проверке"))?;
+        let details = self.details(info_hash)?;
+
+        // Keep the file selection: a release narrowed to one episode must not
+        // silently widen to the whole season because it was re-checked.
+        let only_files: Vec<usize> = details
+            .files
+            .iter()
+            .filter(|f| f.included)
+            .map(|f| f.index)
+            .collect();
+        let only_files = (only_files.len() < details.files.len()).then_some(only_files);
+
+        self.forget(info_hash).await?;
+        self.add(
+            AddSource::Bytes(bytes),
+            AddOptions {
+                output_folder: Some(details.output_folder),
+                only_files,
+                overwrite: true,
+                paused: false,
+            },
+        )
+        .await
     }
 
     pub fn details(&self, info_hash: &str) -> AppResult<TorrentDetails> {

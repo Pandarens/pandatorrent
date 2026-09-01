@@ -107,6 +107,9 @@ export const torrents = {
   addFile: (path: string, outputFolder?: string) =>
     invoke<AddedTorrent>('torrent_add_file', { path, outputFolder: outputFolder ?? null }),
   pause: (infoHash: string) => invoke<void>('torrent_pause', { infoHash }),
+  /** Re-hash the files on disk against the torrent's piece list. */
+  recheck: (infoHash: string) =>
+    invoke<AddedTorrent>('torrent_recheck', { infoHash }),
   resume: (infoHash: string) => invoke<void>('torrent_resume', { infoHash }),
   remove: (infoHash: string, deleteFiles: boolean) =>
     invoke<void>('torrent_remove', { infoHash, deleteFiles }),

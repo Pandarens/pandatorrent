@@ -251,6 +251,9 @@ pub async fn player_watch_topic(
             AddSource::Bytes(bytes),
             AddOptions {
                 output_folder: Some(cache.to_string_lossy().to_string()),
+                // Whatever survived from an earlier viewing counts, instead of
+                // being downloaded a second time.
+                overwrite: true,
                 ..Default::default()
             },
         )

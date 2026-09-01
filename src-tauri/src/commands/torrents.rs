@@ -117,11 +117,30 @@ pub async fn add_url_with(
             AddSource::Url(url.to_string()),
             AddOptions {
                 output_folder,
+                // Files already on disk are hashed and counted, the way any
+                // torrent client behaves. Without this, adding a release that
+                // is already downloaded started it again from nothing.
+                overwrite: true,
                 ..Default::default()
             },
         )
         .await?;
     register(state, &added, source, None, None)?;
+    Ok(added)
+}
+
+/// Re-hashes a torrent's files against the piece list.
+///
+/// The manual counterpart to the check that happens when a torrent is added:
+/// for when files were replaced, moved back, or repaired outside the
+/// application and the figures no longer match what is on disk.
+#[tauri::command]
+pub async fn torrent_recheck(
+    state: State<'_, Arc<AppState>>,
+    info_hash: String,
+) -> AppResult<AddedTorrent> {
+    let added = state.engine.recheck(&info_hash).await?;
+    tracing::info!(%info_hash, "проверка файлов запущена");
     Ok(added)
 }
 
@@ -137,6 +156,10 @@ pub async fn add_path_with(
             AddSource::Bytes(bytes.clone()),
             AddOptions {
                 output_folder,
+                // Files already on disk are hashed and counted, the way any
+                // torrent client behaves. Without this, adding a release that
+                // is already downloaded started it again from nothing.
+                overwrite: true,
                 ..Default::default()
             },
         )

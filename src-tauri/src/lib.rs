@@ -124,6 +124,7 @@ pub fn run() {
             commands::torrents::torrent_add_url,
             commands::torrents::torrent_add_file,
             commands::torrents::torrent_pause,
+            commands::torrents::torrent_recheck,
             commands::torrents::torrent_resume,
             commands::torrents::torrent_remove,
             commands::torrents::torrent_set_files,
@@ -470,6 +471,16 @@ pub fn apply_autostart(app: &AppHandle, wanted: bool) {
     use tauri_plugin_autostart::ManagerExt;
 
     let manager = app.autolaunch();
+
+    // Asking to remove an entry that is not there fails with "file not found",
+    // and this runs on every launch — so the state is checked first. That also
+    // keeps the registry untouched when nothing needs to change.
+    match manager.is_enabled() {
+        Ok(current) if current == wanted => return,
+        Ok(_) => {}
+        Err(e) => tracing::warn!("не удалось прочитать состояние автозапуска: {e}"),
+    }
+
     let result = if wanted {
         manager.enable()
     } else {
@@ -477,6 +488,8 @@ pub fn apply_autostart(app: &AppHandle, wanted: bool) {
     };
     if let Err(e) = result {
         tracing::warn!("не удалось изменить автозапуск: {e}");
+    } else {
+        tracing::info!(wanted, "автозапуск изменён");
     }
 }
 
