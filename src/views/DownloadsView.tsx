@@ -229,7 +229,7 @@ function TorrentRow({
         </div>
       </div>
 
-      {open && <TorrentFiles infoHash={torrent.infoHash} />}
+      {open && <TorrentFiles infoHash={torrent.infoHash} noSeeding={torrent.noSeeding} />}
 
       {confirming && (
         <ConfirmDialog

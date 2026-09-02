@@ -15,8 +15,15 @@ import { Spinner } from './ui'
 /** Extensions worth offering a play button for. */
 const VIDEO = /\.(mkv|mp4|avi|mov|m4v|ts|webm|mpg|mpeg|wmv|flv|m2ts)$/i
 
-export function TorrentFiles({ infoHash }: { infoHash: string }) {
-  const { toast, reportError } = useStore()
+export function TorrentFiles({
+  infoHash,
+  noSeeding,
+}: {
+  infoHash: string
+  noSeeding: boolean
+}) {
+  const { toast, reportError, refreshAll } = useStore()
+  const [selfish, setSelfish] = useState(noSeeding)
   const [files, setFiles] = useState<TorrentFileEntry[] | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -76,8 +83,34 @@ export function TorrentFiles({ infoHash }: { infoHash: string }) {
     )
   }
 
+  async function setSelfishness(on: boolean) {
+    setSelfish(on)
+    try {
+      await torrentsApi.setNoSeeding(infoHash, on)
+      await refreshAll()
+    } catch (e) {
+      setSelfish(!on)
+      reportError(e, 'Раздача')
+    }
+  }
+
   return (
     <div className="files-panel">
+      <div className="files-head">
+        <label className="checkbox inline" title="Останавливать сразу после скачивания">
+          <input
+            type="checkbox"
+            checked={selfish}
+            onChange={(e) => void setSelfishness(e.target.checked)}
+          />
+          <span>Не раздавать эту раздачу</span>
+        </label>
+        <div className="spacer" />
+        <span className="files-hint">
+          Скорость задаётся общая — в настройках и по расписанию
+        </span>
+      </div>
+
       {files.map((f) => {
         const percent = f.length > 0 ? Math.min(100, (f.downloaded / f.length) * 100) : 0
         const ready = percent >= 99.9

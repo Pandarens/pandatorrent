@@ -2676,3 +2676,18 @@ body:has(.pw) {
   color: var(--muted, #9aa3ad);
   font-size: 12px;
 }
+
+/* The header strip above a download's file list. */
+.files-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 2px 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  margin-bottom: 6px;
+}
+
+.files-hint {
+  color: var(--muted, #9aa3ad);
+  font-size: 12px;
+}

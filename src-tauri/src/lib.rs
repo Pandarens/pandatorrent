@@ -126,6 +126,7 @@ pub fn run() {
             commands::torrents::torrent_add_file,
             commands::torrents::torrent_pause,
             commands::torrents::torrent_recheck,
+            commands::torrents::torrent_set_no_seeding,
             commands::torrents::torrent_resume,
             commands::torrents::torrent_remove,
             commands::torrents::torrent_set_files,
@@ -440,9 +441,11 @@ async fn stop_over_seeded(
     stopped: &mut HashSet<String>,
 ) {
     let seeding = state.config.read().seeding.clone();
-    if !seeding.is_active() {
-        // The limit can be lifted while running, and then everything paused
-        // for it should be free to start again.
+    // Individual releases can be marked "download, then stop" even when the
+    // global rules are off, so this cannot bail out on the config alone.
+    let marked = state.db.no_seeding_hashes().unwrap_or_default();
+    if !seeding.is_active() && marked.is_empty() {
+        // A limit lifted while running frees everything paused for it.
         stopped.clear();
         return;
     }
@@ -451,7 +454,8 @@ async fn stop_over_seeded(
         if !p.finished || p.state == "paused" || stopped.contains(&p.info_hash) {
             continue;
         }
-        if !seeding.should_stop(p.uploaded_bytes, p.total_bytes) {
+        let personal = marked.contains(&p.info_hash.to_uppercase());
+        if !personal && !seeding.should_stop(p.uploaded_bytes, p.total_bytes) {
             continue;
         }
         stopped.insert(p.info_hash.clone());

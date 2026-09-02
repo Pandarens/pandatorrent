@@ -45,6 +45,9 @@ pub struct TorrentRecord {
     pub completed_at: Option<i64>,
     pub source: TorrentSource,
     pub topic_id: Option<i64>,
+    /// Stop this one as soon as it is downloaded, whatever the global rule.
+    #[serde(default)]
+    pub no_seeding: bool,
 }
 
 /// A card in the Steam-like library view.

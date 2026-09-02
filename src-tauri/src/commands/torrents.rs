@@ -52,6 +52,8 @@ pub fn build_views(state: &AppState) -> AppResult<Vec<TorrentView>> {
                 completed_at: None,
                 source: TorrentSource::File,
                 topic_id: None,
+                // Not in the database at all, so it carries no preference.
+                no_seeding: false,
             },
             progress: Some(p),
         });
@@ -127,6 +129,25 @@ pub async fn add_url_with(
         .await?;
     register(state, &added, source, None, None)?;
     Ok(added)
+}
+
+/// Marks one release as "download, then stop giving it back".
+///
+/// Independent of the global rule, so a single release can be held back
+/// without changing how everything else behaves.
+#[tauri::command]
+pub async fn torrent_set_no_seeding(
+    state: State<'_, Arc<AppState>>,
+    info_hash: String,
+    on: bool,
+) -> AppResult<()> {
+    state.db.set_no_seeding(&info_hash, on)?;
+    if !on {
+        // Turning it back on should start the release seeding again, rather
+        // than leaving it paused with no explanation.
+        let _ = state.engine.resume(&info_hash).await;
+    }
+    Ok(())
 }
 
 /// Re-hashes a torrent's files against the piece list.

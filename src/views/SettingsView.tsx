@@ -691,8 +691,9 @@ export function SettingsView() {
         <h3 className="card-title">Раздача</h3>
         <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
           Скачанное раздаётся дальше — на трекерах от этого зависит рейтинг.
-          Можно остановить раздачу, когда отдано достаточно. Ноль означает
-          раздавать без ограничения.
+          Можно остановить раздачу, когда отдано достаточно, или не раздавать
+          совсем. Ноль в поле рейтинга означает раздавать без ограничения.
+          Отдельную раздачу можно придержать прямо в «Загрузках», раскрыв её.
         </p>
         <label className="checkbox">
           <input
@@ -700,7 +701,7 @@ export function SettingsView() {
             checked={draft.seeding.stopWhenDone}
             onChange={(e) => patch((d) => (d.seeding.stopWhenDone = e.target.checked))}
           />
-          <span>Не раздавать: останавливать сразу после скачивания</span>
+          <span>Не раздавать вообще — я эгоист :D</span>
         </label>
 
         <label className="field" style={{ maxWidth: 280, marginTop: 10 }}>

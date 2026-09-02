@@ -69,6 +69,8 @@ export interface TorrentView {
   completedAt: number | null
   source: TorrentSource
   topicId: number | null
+  /** Stop this release as soon as it is downloaded. */
+  noSeeding: boolean
   progress: TorrentProgress | null
 }
 

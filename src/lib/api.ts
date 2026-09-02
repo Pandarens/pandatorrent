@@ -110,6 +110,8 @@ export const torrents = {
   /** Re-hash the files on disk against the torrent's piece list. */
   recheck: (infoHash: string) =>
     invoke<AddedTorrent>('torrent_recheck', { infoHash }),
+  setNoSeeding: (infoHash: string, on: boolean) =>
+    invoke<void>('torrent_set_no_seeding', { infoHash, on }),
   resume: (infoHash: string) => invoke<void>('torrent_resume', { infoHash }),
   remove: (infoHash: string, deleteFiles: boolean) =>
     invoke<void>('torrent_remove', { infoHash, deleteFiles }),
