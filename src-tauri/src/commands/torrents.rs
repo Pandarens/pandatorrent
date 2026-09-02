@@ -55,6 +55,7 @@ pub fn build_views(state: &AppState) -> AppResult<Vec<TorrentView>> {
                 // Not in the database at all, so it carries no preference.
                 no_seeding: false,
                 user_paused: false,
+                forced: false,
             },
             progress: Some(p),
         });
@@ -130,6 +131,26 @@ pub async fn add_url_with(
         .await?;
     register(state, &added, source, None, None)?;
     Ok(added)
+}
+
+/// Runs a release regardless of the queue limit, or gives it back to the queue.
+///
+/// The escape hatch for a limit that is right most of the time: two downloads
+/// at once when the rule says one, without changing the rule.
+#[tauri::command]
+pub async fn torrent_set_forced(
+    state: State<'_, Arc<AppState>>,
+    info_hash: String,
+    on: bool,
+) -> AppResult<()> {
+    state.db.set_forced(&info_hash, on)?;
+    if on {
+        // Start it now rather than at the next sweep — the point of insisting
+        // is that it happens straight away.
+        state.engine.resume(&info_hash).await?;
+    }
+    tracing::info!(%info_hash, on, "принудительный запуск");
+    Ok(())
 }
 
 /// Who we are exchanging pieces with, for one torrent.
@@ -382,6 +403,9 @@ pub struct QueueItem {
     pub finished: bool,
     /// A person stopped it, so the queue must not touch it.
     pub user_paused: bool,
+    /// A person insisted on this one: it runs whatever the limit says, and
+    /// takes none of the places, so two can be forced past a limit of one.
+    pub forced: bool,
     pub running: bool,
 }
 
@@ -395,20 +419,27 @@ pub fn queue_plan(items: &[QueueItem], max_active: u32) -> (Vec<String>, Vec<Str
         // No limit: everything a person has not paused should be running.
         let start = items
             .iter()
-            .filter(|i| !i.user_paused && !i.running)
+            .filter(|i| (!i.user_paused || i.forced) && !i.running)
             .map(|i| i.info_hash.clone())
             .collect();
         return (start, Vec::new());
     }
 
+    let mut start = Vec::new();
+    let mut pause = Vec::new();
+
+    // Forced downloads run outside the queue entirely — neither held back by
+    // it nor counted against it.
+    for item in items.iter().filter(|i| i.forced && !i.running) {
+        start.push(item.info_hash.clone());
+    }
+
     let mut waiting: Vec<&QueueItem> = items
         .iter()
-        .filter(|i| !i.finished && !i.user_paused)
+        .filter(|i| !i.finished && !i.user_paused && !i.forced)
         .collect();
     waiting.sort_by_key(|i| i.added_at);
 
-    let mut start = Vec::new();
-    let mut pause = Vec::new();
     for (place, item) in waiting.iter().enumerate() {
         let should_run = (place as u32) < max_active;
         if should_run && !item.running {
@@ -419,7 +450,10 @@ pub fn queue_plan(items: &[QueueItem], max_active: u32) -> (Vec<String>, Vec<Str
     }
 
     // A finished torrent left paused by the queue earlier is free to seed.
-    for item in items.iter().filter(|i| i.finished && !i.user_paused && !i.running) {
+    for item in items
+        .iter()
+        .filter(|i| i.finished && !i.user_paused && !i.forced && !i.running)
+    {
         start.push(item.info_hash.clone());
     }
     (start, pause)
@@ -435,8 +469,36 @@ mod queue_tests {
             added_at,
             finished: false,
             user_paused: false,
+            forced: false,
             running,
         }
+    }
+
+    #[test]
+    fn a_forced_download_runs_past_the_limit_and_takes_no_place() {
+        // The whole point: a limit of one, and two downloads running because
+        // the second was insisted upon.
+        let mut items = vec![item("queued", 10, true), item("forced", 20, false)];
+        items[1].forced = true;
+        let (start, pause) = queue_plan(&items, 1);
+        assert_eq!(start, vec!["forced".to_string()]);
+        // The ordinary one keeps its slot: the forced one did not steal it.
+        assert!(pause.is_empty());
+    }
+
+    #[test]
+    fn forcing_beats_a_full_queue_without_disturbing_the_order() {
+        let mut items = vec![
+            item("first", 10, true),
+            item("second", 20, true),
+            item("third", 30, false),
+        ];
+        items[2].forced = true;
+        let (start, pause) = queue_plan(&items, 1);
+        assert_eq!(start, vec!["third".to_string()]);
+        // "second" is over the limit and still steps aside; forcing "third"
+        // changed nothing about that.
+        assert_eq!(pause, vec!["second".to_string()]);
     }
 
     #[test]

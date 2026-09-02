@@ -73,6 +73,8 @@ export interface TorrentView {
   noSeeding: boolean
   /** A person paused it, as opposed to the queue doing so. */
   userPaused: boolean
+  /** Runs regardless of the queue limit, and takes none of its places. */
+  forced: boolean
   progress: TorrentProgress | null
 }
 

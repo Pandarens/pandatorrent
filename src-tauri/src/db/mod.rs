@@ -16,7 +16,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use crate::error::AppResult;
 use models::*;
 
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 
 /// Below this, resuming is not worth offering — it is effectively the start.
 const RESUME_MIN_SECONDS: f64 = 30.0;
@@ -66,7 +66,9 @@ impl Db {
                 -- 1 when this release should stop as soon as it is downloaded.
                 no_seeding    INTEGER NOT NULL DEFAULT 0,
                 -- 1 when a person paused it, as opposed to the queue doing so.
-                user_paused   INTEGER NOT NULL DEFAULT 0
+                user_paused   INTEGER NOT NULL DEFAULT 0,
+                -- 1 when it runs regardless of the queue limit.
+                forced        INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_torrents_topic ON torrents(topic_id);
 
@@ -179,6 +181,11 @@ impl Db {
             "ALTER TABLE torrents ADD COLUMN user_paused INTEGER NOT NULL DEFAULT 0",
             [],
         );
+        // Added in schema 8.
+        let _ = conn.execute(
+            "ALTER TABLE torrents ADD COLUMN forced INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
 
         conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
         Ok(())
@@ -214,6 +221,17 @@ impl Db {
     // ---------------------------------------------------------- torrents
 
     #[allow(clippy::too_many_arguments)]
+    /// Marks a release as running regardless of the queue limit.
+    pub fn set_forced(&self, info_hash: &str, forced: bool) -> AppResult<()> {
+        let conn = self.conn.lock();
+        conn.execute(
+            "UPDATE torrents SET forced = ?2, user_paused = CASE WHEN ?2 = 1 THEN 0 ELSE user_paused END
+             WHERE info_hash = ?1",
+            params![info_hash, forced as i64],
+        )?;
+        Ok(())
+    }
+
     /// Records that a person paused this release, rather than the queue.
     ///
     /// Without the distinction the queue would restart a download somebody
@@ -289,7 +307,7 @@ impl Db {
         let conn = self.conn.lock();
         Ok(conn
             .query_row(
-                "SELECT info_hash, name, output_folder, total_bytes, added_at, completed_at, source, topic_id, no_seeding, user_paused
+                "SELECT info_hash, name, output_folder, total_bytes, added_at, completed_at, source, topic_id, no_seeding, user_paused, forced
                  FROM torrents WHERE info_hash = ?1",
                 params![info_hash],
                 map_torrent,
@@ -312,7 +330,7 @@ impl Db {
     pub fn list_torrents(&self) -> AppResult<Vec<TorrentRecord>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare(
-            "SELECT info_hash, name, output_folder, total_bytes, added_at, completed_at, source, topic_id, no_seeding, user_paused
+            "SELECT info_hash, name, output_folder, total_bytes, added_at, completed_at, source, topic_id, no_seeding, user_paused, forced
              FROM torrents ORDER BY added_at DESC",
         )?;
         let rows = stmt.query_map([], map_torrent)?;
@@ -887,6 +905,7 @@ fn map_torrent(r: &rusqlite::Row<'_>) -> rusqlite::Result<TorrentRecord> {
         topic_id: r.get(7)?,
         no_seeding: r.get::<_, i64>(8)? != 0,
         user_paused: r.get::<_, i64>(9)? != 0,
+        forced: r.get::<_, i64>(10)? != 0,
     })
 }
 

@@ -114,6 +114,8 @@ export const torrents = {
     invoke<AddedTorrent>('torrent_recheck', { infoHash }),
   setNoSeeding: (infoHash: string, on: boolean) =>
     invoke<void>('torrent_set_no_seeding', { infoHash, on }),
+  setForced: (infoHash: string, on: boolean) =>
+    invoke<void>('torrent_set_forced', { infoHash, on }),
   peers: (infoHash: string) => invoke<PeerView[]>('torrent_peers', { infoHash }),
   sessionStats: () => invoke<SessionSummary>('session_stats'),
   create: (source: string, saveTo: string, name: string | null, trackers: string[]) =>

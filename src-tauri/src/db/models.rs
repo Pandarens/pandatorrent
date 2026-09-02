@@ -51,6 +51,9 @@ pub struct TorrentRecord {
     /// A person paused it, so the queue must leave it alone.
     #[serde(default)]
     pub user_paused: bool,
+    /// Runs regardless of the queue limit, and takes none of its places.
+    #[serde(default)]
+    pub forced: bool,
 }
 
 /// A card in the Steam-like library view.

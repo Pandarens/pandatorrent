@@ -127,6 +127,7 @@ pub fn run() {
             commands::torrents::torrent_pause,
             commands::torrents::torrent_recheck,
             commands::torrents::torrent_set_no_seeding,
+            commands::torrents::torrent_set_forced,
             commands::torrents::torrent_peers,
             commands::torrents::torrent_create,
             commands::torrents::session_stats,
@@ -467,6 +468,7 @@ async fn apply_queue(
                 info_hash: p.info_hash.clone(),
                 added_at: record.added_at,
                 finished: p.finished,
+                forced: record.forced,
                 running: p.state != "paused",
             })
         })

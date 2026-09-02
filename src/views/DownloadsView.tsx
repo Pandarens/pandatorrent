@@ -270,9 +270,11 @@ function TorrentRow({
         <span className={finished ? 'tag accent' : 'tag'}>
           {/* A queue-held download is not the same as one somebody stopped,
               and calling both "пауза" hides why nothing is happening. */}
-          {state === 'paused' && !finished && !torrent.userPaused
-            ? 'В очереди'
-            : stateLabel(state, finished, hasError)}
+          {torrent.forced && !finished
+            ? 'Принудительно'
+            : state === 'paused' && !finished && !torrent.userPaused
+              ? 'В очереди'
+              : stateLabel(state, finished, hasError)}
         </span>
         <div className="torrent-actions">
           {state === 'paused' ? (
@@ -290,6 +292,25 @@ function TorrentRow({
               onClick={() => act(() => torrentsApi.pause(torrent.infoHash))}
             >
               ⏸
+            </button>
+          )}
+          {!finished && (
+            <button
+              className={torrent.forced ? 'btn sm accent' : 'btn sm'}
+              disabled={busy}
+              title={
+                torrent.forced
+                  ? 'Вернуть в общую очередь'
+                  : 'Качать не дожидаясь очереди'
+              }
+              onClick={() =>
+                act(
+                  () => torrentsApi.setForced(torrent.infoHash, !torrent.forced),
+                  torrent.forced ? 'Вернул в очередь' : 'Запускаю принудительно',
+                )
+              }
+            >
+              ⚡
             </button>
           )}
           <button

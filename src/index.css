@@ -2782,3 +2782,9 @@ body:has(.pw) {
   height: 1px;
   background: rgba(255, 255, 255, 0.09);
 }
+
+/* A control that is currently doing something out of the ordinary. */
+.btn.sm.accent {
+  color: var(--accent, #57c26a);
+  border-color: var(--accent, #57c26a);
+}
