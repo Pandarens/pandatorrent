@@ -220,7 +220,23 @@ pub async fn check_and_notify(app: &AppHandle, state: &AppState) -> AppResult<Ch
     if !outcome.new_updates.is_empty() {
         let _ = app.emit(events::UPDATES_FOUND, &outcome.new_updates);
 
+        // Applying them without asking, when that is what was asked for. The
+        // setting existed from the start and did nothing at all — a promise
+        // the settings screen never kept.
+        if state.config.read().updates.auto_download {
+            for update in &outcome.new_updates {
+                match apply_update(app, state, update.id).await {
+                    Ok(_) => tracing::info!(
+                        title = update.title.as_deref().unwrap_or("раздача"),
+                        "обновление скачано автоматически"
+                    ),
+                    Err(e) => tracing::warn!("не удалось обновить раздачу автоматически: {e}"),
+                }
+            }
+        }
+
         if state.config.read().updates.notify_desktop {
+            let automatic = state.config.read().updates.auto_download;
             let body = match outcome.new_updates.len() {
                 1 => outcome.new_updates[0]
                     .title
@@ -231,7 +247,11 @@ pub async fn check_and_notify(app: &AppHandle, state: &AppState) -> AppResult<Ch
             let _ = app
                 .notification()
                 .builder()
-                .title("Panda Torrent — доступно обновление")
+                .title(if automatic {
+                    "Panda Torrent — раздача обновлена"
+                } else {
+                    "Panda Torrent — доступно обновление"
+                })
                 .body(body)
                 .show();
         }

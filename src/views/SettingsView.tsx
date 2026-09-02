@@ -468,6 +468,14 @@ export function SettingsView() {
           />
           <span>Показывать системные уведомления</span>
         </label>
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.updates.autoDownload}
+            onChange={(e) => patch((d) => (d.updates.autoDownload = e.target.checked))}
+          />
+          <span>Скачивать обновления раздач сразу, не спрашивая</span>
+        </label>
       </div>
 
       <div className="card">
