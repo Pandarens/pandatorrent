@@ -472,3 +472,21 @@ export interface Leftover {
   bytesOnDisk: number
   totalBytes: number
 }
+
+/** One peer we are exchanging pieces with. */
+export interface PeerView {
+  address: string
+  client: string | null
+  state: string
+  downloaded: number
+  uploaded: number
+}
+
+/** Totals for the whole session. */
+export interface SessionSummary {
+  downloadSpeedBps: number
+  uploadSpeedBps: number
+  uptimeSeconds: number
+  /** Nodes in the DHT routing table — a rough health signal. */
+  dhtNodes: number
+}

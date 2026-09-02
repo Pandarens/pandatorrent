@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Sidebar, type ViewId } from './components/Sidebar'
 import { LeftoverWatches } from './components/LeftoverWatches'
 import { ShutdownCountdown } from './components/ShutdownCountdown'
+import { StatusBar } from './components/StatusBar'
 import { Toasts } from './components/ui'
 import { UpdateModal } from './components/UpdateModal'
 import { onProgress, power as powerApi } from './lib/api'
@@ -100,6 +101,8 @@ function Shell() {
         {view === 'updates' && <UpdatesView />}
         {view === 'settings' && <SettingsView />}
       </main>
+
+      <StatusBar />
 
       {prompt && <UpdateModal update={prompt} onClose={() => setPrompt(null)} />}
 

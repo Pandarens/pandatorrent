@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import { player as playerApi, torrents as torrentsApi } from '../lib/api'
 import { formatBytes } from '../lib/format'
 import { useStore } from '../lib/store'
-import type { TorrentFileEntry } from '../lib/types'
+import type { PeerView, TorrentFileEntry } from '../lib/types'
 import { Spinner } from './ui'
 
 /** Extensions worth offering a play button for. */
@@ -25,6 +25,8 @@ export function TorrentFiles({
   const { toast, reportError, refreshAll } = useStore()
   const [selfish, setSelfish] = useState(noSeeding)
   const [files, setFiles] = useState<TorrentFileEntry[] | null>(null)
+  const [peers, setPeers] = useState<PeerView[]>([])
+  const [tab, setTab] = useState<'files' | 'peers'>('files')
   const [busy, setBusy] = useState(false)
 
   async function load() {
@@ -34,6 +36,13 @@ export function TorrentFiles({
     } catch (e) {
       reportError(e, 'Файлы раздачи')
       setFiles([])
+    }
+    // Peers come and go constantly, and a torrent that is not live has none —
+    // an empty list here is normal, not a fault worth reporting.
+    try {
+      setPeers(await torrentsApi.peers(infoHash))
+    } catch {
+      setPeers([])
     }
   }
 
@@ -97,6 +106,21 @@ export function TorrentFiles({
   return (
     <div className="files-panel">
       <div className="files-head">
+        <div className="files-tabs">
+          <button
+            className={tab === 'files' ? 'tab on' : 'tab'}
+            onClick={() => setTab('files')}
+          >
+            Файлы
+          </button>
+          <button
+            className={tab === 'peers' ? 'tab on' : 'tab'}
+            onClick={() => setTab('peers')}
+          >
+            Пиры {peers.length > 0 ? `(${peers.length})` : ''}
+          </button>
+        </div>
+
         <label className="checkbox inline" title="Останавливать сразу после скачивания">
           <input
             type="checkbox"
@@ -111,7 +135,28 @@ export function TorrentFiles({
         </span>
       </div>
 
-      {files.map((f) => {
+      {tab === 'peers' &&
+        (peers.length === 0 ? (
+          <div className="files-hint" style={{ padding: '8px 6px' }}>
+            Сейчас никто не подключён
+          </div>
+        ) : (
+          peers.map((p) => (
+            <div className="file-row" key={p.address}>
+              <span className="peer-addr">{p.address}</span>
+              <span className="file-name" title={p.client ?? ''}>
+                {p.client ?? '—'}
+              </span>
+              <span className="peer-state">{p.state}</span>
+              <span className="file-size">
+                ↓ {formatBytes(p.downloaded)} · ↑ {formatBytes(p.uploaded)}
+              </span>
+            </div>
+          ))
+        ))}
+
+      {tab === 'files' &&
+        files.map((f) => {
         const percent = f.length > 0 ? Math.min(100, (f.downloaded / f.length) * 100) : 0
         const ready = percent >= 99.9
         return (
@@ -146,8 +191,8 @@ export function TorrentFiles({
               </button>
             )}
           </div>
-        )
-      })}
+          )
+        })}
     </div>
   )
 }

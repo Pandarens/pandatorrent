@@ -131,6 +131,39 @@ pub async fn add_url_with(
     Ok(added)
 }
 
+/// Who we are exchanging pieces with, for one torrent.
+#[tauri::command]
+pub async fn torrent_peers(
+    state: State<'_, Arc<AppState>>,
+    info_hash: String,
+) -> AppResult<Vec<crate::engine::PeerView>> {
+    state.engine.peers(&info_hash)
+}
+
+/// Totals for the whole session, for the status line.
+#[tauri::command]
+pub async fn session_stats(
+    state: State<'_, Arc<AppState>>,
+) -> AppResult<crate::engine::SessionSummary> {
+    Ok(state.engine.session_stats())
+}
+
+/// Builds a `.torrent` from a file or folder and writes it out.
+#[tauri::command]
+pub async fn torrent_create(
+    source: String,
+    save_to: String,
+    name: Option<String>,
+    trackers: Vec<String>,
+) -> AppResult<()> {
+    let bytes =
+        crate::engine::Engine::create_torrent_bytes(std::path::Path::new(&source), name, trackers).await?;
+    std::fs::write(&save_to, bytes)
+        .map_err(|e| AppError::msg(format!("не удалось сохранить файл: {e}")))?;
+    tracing::info!(%source, %save_to, "торрент создан");
+    Ok(())
+}
+
 /// Marks one release as "download, then stop giving it back".
 ///
 /// Independent of the global rule, so a single release can be held back

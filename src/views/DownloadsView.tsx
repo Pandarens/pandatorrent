@@ -10,6 +10,7 @@ import type { TorrentProgress, TorrentView } from '../lib/types'
 import { Empty, Modal, ProgressBar } from '../components/ui'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { TorrentFiles } from '../components/TorrentFiles'
+import { CreateTorrentModal } from '../components/CreateTorrentModal'
 
 type Filter = 'all' | 'active' | 'done'
 
@@ -37,6 +38,7 @@ export function DownloadsView({
   const { torrents, progress, refreshAll, toast, reportError } = useStore()
   const [filter, setFilter] = useState<Filter>('all')
   const [addOpen, setAddOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const [search, setSearch] = useState('')
 
   const rows = useMemo(() => {
@@ -92,6 +94,9 @@ export function DownloadsView({
         <button className="btn sm" onClick={addFromFile}>
           📄 Из файла
         </button>
+        <button className="btn sm" title="Собрать .torrent из своих файлов" onClick={() => setCreateOpen(true)}>
+          ✚ Создать
+        </button>
         <button className="btn primary sm" onClick={() => setAddOpen(true)}>
           🧲 Magnet / ссылка
         </button>
@@ -132,6 +137,7 @@ export function DownloadsView({
       )}
 
       {addOpen && <AddUrlModal onClose={() => setAddOpen(false)} />}
+      {createOpen && <CreateTorrentModal onClose={() => setCreateOpen(false)} />}
     </div>
   )
 }

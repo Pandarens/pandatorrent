@@ -2691,3 +2691,69 @@ body:has(.pw) {
   color: var(--muted, #9aa3ad);
   font-size: 12px;
 }
+
+/* Tabs inside a download's panel. */
+.files-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.files-tabs .tab {
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted, #9aa3ad);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.files-tabs .tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.files-tabs .tab.on {
+  background: rgba(255, 255, 255, 0.09);
+  color: inherit;
+}
+
+.peer-addr {
+  flex: none;
+  min-width: 160px;
+  font-variant-numeric: tabular-nums;
+}
+
+.peer-state {
+  flex: none;
+  min-width: 90px;
+  color: var(--muted, #9aa3ad);
+}
+
+/* Room for the status strip: a second row under the content, with the
+   sidebar running the full height beside both. */
+.app {
+  grid-template-rows: 1fr auto;
+}
+
+.sidebar {
+  grid-row: 1 / span 2;
+}
+
+/* The session status strip along the bottom of the window. */
+.status-bar {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px 18px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted, #9aa3ad);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.status-bar .spacer {
+  flex: 1;
+}

@@ -56,6 +56,29 @@ pub struct TorrentFileEntry {
     pub downloaded: u64,
 }
 
+/// One peer we are connected to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerView {
+    pub address: String,
+    /// What the other end says it is running, when it says.
+    pub client: Option<String>,
+    pub state: String,
+    pub downloaded: u64,
+    pub uploaded: u64,
+}
+
+/// Session-wide totals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSummary {
+    pub download_speed_bps: u64,
+    pub upload_speed_bps: u64,
+    pub uptime_seconds: u64,
+    /// Nodes in the DHT routing table — a rough health signal.
+    pub dht_nodes: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TorrentDetails {
@@ -198,6 +221,71 @@ impl Engine {
             handle.name(),
             stats,
         ))
+    }
+
+    /// Builds a `.torrent` from a file or folder on disk.
+    ///
+    /// Free-standing rather than a method: making a torrent needs no session,
+    /// and pretending otherwise would tie it to a running engine for nothing.
+    pub async fn create_torrent_bytes(
+        path: &std::path::Path,
+        name: Option<String>,
+        trackers: Vec<String>,
+    ) -> AppResult<Vec<u8>> {
+        let options = librqbit::CreateTorrentOptions {
+            name: name.as_deref(),
+            trackers,
+            // librqbit picks a piece length to suit the size.
+            piece_length: None,
+        };
+        // Hashing a folder is heavy and blocking; four threads is plenty for
+        // a one-off and leaves the rest of the machine alone.
+        let spawner = librqbit::spawn_utils::BlockingSpawner::new(4);
+        let result = librqbit::create_torrent(path, options, &spawner)
+            .await
+            .map_err(|e| AppError::msg(format!("не удалось собрать торрент: {e}")))?;
+        let bytes = result
+            .as_bytes()
+            .map_err(|e| AppError::msg(format!("не удалось записать торрент: {e}")))?;
+        Ok(bytes.to_vec())
+    }
+
+    /// Who we are exchanging pieces with, for one torrent.
+    pub fn peers(&self, info_hash: &str) -> AppResult<Vec<PeerView>> {
+        let idx = parse_id(info_hash)?;
+        // The filter type is not exported by librqbit, but it implements
+        // `Default`, and the parameter position tells the compiler which type
+        // that is — so it can be asked for without ever naming it.
+        let snapshot = self
+            .api
+            .api_peer_stats(idx, Default::default())
+            .map_err(|e| AppError::Other(e.to_string()))?;
+
+        let mut peers: Vec<PeerView> = snapshot
+            .peers
+            .into_iter()
+            .map(|(address, stats)| PeerView {
+                address,
+                client: stats.client_name,
+                state: stats.state.to_string(),
+                downloaded: stats.counters.fetched_bytes,
+                uploaded: stats.counters.uploaded_bytes,
+            })
+            .collect();
+        // Busiest first: that is the interesting end of the list.
+        peers.sort_by(|a, b| b.downloaded.cmp(&a.downloaded));
+        Ok(peers)
+    }
+
+    /// Totals for the whole session, for the status line.
+    pub fn session_stats(&self) -> SessionSummary {
+        let stats = self.api.api_session_stats();
+        SessionSummary {
+            download_speed_bps: (stats.download_speed.mbps * 125_000.0) as u64,
+            upload_speed_bps: (stats.upload_speed.mbps * 125_000.0) as u64,
+            uptime_seconds: stats.uptime_seconds,
+            dht_nodes: self.api.api_dht_stats().map(|d| (d.routing_table_size + d.routing_table_size_v6) as u64).unwrap_or(0),
+        }
     }
 
     /// Changes the speed limits of a running session.

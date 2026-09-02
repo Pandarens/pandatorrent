@@ -6,6 +6,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
+  PeerView,
+  SessionSummary,
   Leftover,
   AddedTorrent,
   CatalogCategory,
@@ -112,6 +114,10 @@ export const torrents = {
     invoke<AddedTorrent>('torrent_recheck', { infoHash }),
   setNoSeeding: (infoHash: string, on: boolean) =>
     invoke<void>('torrent_set_no_seeding', { infoHash, on }),
+  peers: (infoHash: string) => invoke<PeerView[]>('torrent_peers', { infoHash }),
+  sessionStats: () => invoke<SessionSummary>('session_stats'),
+  create: (source: string, saveTo: string, name: string | null, trackers: string[]) =>
+    invoke<void>('torrent_create', { source, saveTo, name, trackers }),
   resume: (infoHash: string) => invoke<void>('torrent_resume', { infoHash }),
   remove: (infoHash: string, deleteFiles: boolean) =>
     invoke<void>('torrent_remove', { infoHash, deleteFiles }),
