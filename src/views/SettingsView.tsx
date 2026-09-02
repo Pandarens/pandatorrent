@@ -2,7 +2,7 @@
 // than pretending the change took effect.
 
 import { useEffect, useState } from 'react'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open, save as saveDialog } from '@tauri-apps/plugin-dialog'
 
 import {
   appUpdate as appUpdateApi,
@@ -617,6 +617,77 @@ export function SettingsView() {
       </div>
 
       <div className="card">
+        <h3 className="card-title">Скорость по расписанию</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          В указанные часы действуют другие ограничения — например, потише днём и
+          без ограничений ночью. Если конец раньше начала, промежуток идёт через
+          полночь. Ноль означает без ограничения.
+        </p>
+
+        <label className="checkbox">
+          <input
+            type="checkbox"
+            checked={draft.schedule.enabled}
+            onChange={(e) => patch((d) => (d.schedule.enabled = e.target.checked))}
+          />
+          <span>Включить расписание</span>
+        </label>
+
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10 }}>
+          <label className="field" style={{ maxWidth: 130 }}>
+            <span>С часа</span>
+            <input
+              type="number"
+              min={0}
+              max={23}
+              disabled={!draft.schedule.enabled}
+              value={draft.schedule.fromHour}
+              onChange={(e) =>
+                patch((d) => (d.schedule.fromHour = Math.min(23, Math.max(0, Number(e.target.value) || 0))))
+              }
+            />
+          </label>
+          <label className="field" style={{ maxWidth: 130 }}>
+            <span>До часа</span>
+            <input
+              type="number"
+              min={0}
+              max={23}
+              disabled={!draft.schedule.enabled}
+              value={draft.schedule.toHour}
+              onChange={(e) =>
+                patch((d) => (d.schedule.toHour = Math.min(23, Math.max(0, Number(e.target.value) || 0))))
+              }
+            />
+          </label>
+          <label className="field" style={{ maxWidth: 170 }}>
+            <span>Приём, КБ/с</span>
+            <input
+              type="number"
+              min={0}
+              disabled={!draft.schedule.enabled}
+              value={draft.schedule.downloadLimitKbps}
+              onChange={(e) =>
+                patch((d) => (d.schedule.downloadLimitKbps = Math.max(0, Number(e.target.value) || 0)))
+              }
+            />
+          </label>
+          <label className="field" style={{ maxWidth: 170 }}>
+            <span>Отдача, КБ/с</span>
+            <input
+              type="number"
+              min={0}
+              disabled={!draft.schedule.enabled}
+              value={draft.schedule.uploadLimitKbps}
+              onChange={(e) =>
+                patch((d) => (d.schedule.uploadLimitKbps = Math.max(0, Number(e.target.value) || 0)))
+              }
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="card">
         <h3 className="card-title">Раздача</h3>
         <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
           Скачанное раздаётся дальше — на трекерах от этого зависит рейтинг.
@@ -686,6 +757,77 @@ export function SettingsView() {
             }
           />
         </label>
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">Кэш просмотра</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          Просмотр без скачивания держит файлы во временной папке. Когда она
+          перерастает потолок, убираются самые давние — то, что смотрят сейчас,
+          не трогается никогда. Ноль снимает ограничение.
+        </p>
+        <label className="field" style={{ maxWidth: 280 }}>
+          <span>Не больше, ГБ</span>
+          <input
+            type="number"
+            min={0}
+            max={2000}
+            value={draft.streamCacheLimitGb}
+            onChange={(e) =>
+              patch((d) => (d.streamCacheLimitGb = Math.max(0, Number(e.target.value) || 0)))
+            }
+          />
+        </label>
+      </div>
+
+      <div className="card">
+        <h3 className="card-title">Файл настроек</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          Все настройки можно выгрузить в файл и вернуть обратно — например, после
+          переустановки системы.
+        </p>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            className="btn"
+            onClick={async () => {
+              try {
+                const path = await saveDialog({
+                  title: 'Куда сохранить настройки',
+                  defaultPath: 'panda-torrent-settings.json',
+                  filters: [{ name: 'Настройки', extensions: ['json'] }],
+                })
+                if (!path) return
+                await settingsApi.exportTo(path)
+                toast('Настройки сохранены')
+              } catch (e) {
+                reportError(e, 'Выгрузка настроек')
+              }
+            }}
+          >
+            Выгрузить в файл
+          </button>
+
+          <button
+            className="btn"
+            onClick={async () => {
+              try {
+                const picked = await open({
+                  title: 'Файл настроек',
+                  multiple: false,
+                  filters: [{ name: 'Настройки', extensions: ['json'] }],
+                })
+                if (typeof picked !== 'string') return
+                const loaded = await settingsApi.importFrom(picked)
+                setDraft(loaded)
+                toast('Настройки загружены')
+              } catch (e) {
+                reportError(e, 'Загрузка настроек')
+              }
+            }}
+          >
+            Загрузить из файла
+          </button>
+        </div>
       </div>
 
       <div className="card">

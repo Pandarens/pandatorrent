@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { convertFileSrc } from '@tauri-apps/api/core'
 
-import { library as libraryApi, torrents as torrentsApi } from '../lib/api'
+import { library as libraryApi, settings as settingsApi, torrents as torrentsApi } from '../lib/api'
 import { formatBytes, formatDate, formatPlaytime, progressPercent } from '../lib/format'
 import { useStore } from '../lib/store'
 import type { ExecutableCandidate, LibraryItem, TopicUpdate } from '../lib/types'
@@ -40,7 +40,18 @@ export function LibraryView({
 }
 
 function LibraryGrid({ onSelect }: { onSelect: (hash: string) => void }) {
-  const { library, progress } = useStore()
+  const { library, progress, config, reportError } = useStore()
+
+  // Remembered in settings, the same way the search view already is.
+  const asList = config?.ui.libraryView === 'list'
+  async function setLibraryView(mode: 'grid' | 'list') {
+    if (!config) return
+    try {
+      await settingsApi.set({ ...config, ui: { ...config.ui, libraryView: mode } })
+    } catch (e) {
+      reportError(e, 'Вид библиотеки')
+    }
+  }
   const [query, setQuery] = useState('')
   const [onlyFavorites, setOnlyFavorites] = useState(false)
 
@@ -69,6 +80,7 @@ function LibraryGrid({ onSelect }: { onSelect: (hash: string) => void }) {
 
   return (
     <div className="page">
+      <ContinueWatching />
       <Wishlist onOpenGame={onSelect} />
       <WatchHistory />
 
@@ -82,6 +94,13 @@ function LibraryGrid({ onSelect }: { onSelect: (hash: string) => void }) {
         >
           ★ Избранное
         </button>
+        <button
+          className="btn sm"
+          title={asList ? 'Показать плитками' : 'Показать списком'}
+          onClick={() => void setLibraryView(asList ? 'grid' : 'list')}
+        >
+          {asList ? '▦' : '☰'}
+        </button>
         <input
           className="input"
           style={{ width: 240 }}
@@ -94,18 +113,41 @@ function LibraryGrid({ onSelect }: { onSelect: (hash: string) => void }) {
       {items.length === 0 ? (
         <Empty icon="🔍" title="Ничего не найдено" />
       ) : (
-        <div className="library-grid">
-          {items.map((game) => (
-            <GameCard
-              key={game.infoHash}
-              game={game}
-              downloading={progress[game.infoHash.toUpperCase()]}
-              onClick={() => onSelect(game.infoHash)}
-            />
-          ))}
+        <div className={asList ? 'library-list' : 'library-grid'}>
+          {items.map((game) =>
+            asList ? (
+              <GameLine
+                key={game.infoHash}
+                game={game}
+                onClick={() => onSelect(game.infoHash)}
+              />
+            ) : (
+              <GameCard
+                key={game.infoHash}
+                game={game}
+                downloading={progress[game.infoHash.toUpperCase()]}
+                onClick={() => onSelect(game.infoHash)}
+              />
+            ),
+          )}
         </div>
       )}
     </div>
+  )
+}
+
+/** One library entry as a line, for people with more titles than wall space. */
+function GameLine({ game, onClick }: { game: LibraryItem; onClick: () => void }) {
+  const src = coverSrc(game.coverPath)
+  return (
+    <button className="library-line" onClick={onClick} title={game.title}>
+      <span className="library-line-art">
+        {src ? <img src={src} alt="" loading="lazy" /> : <span>🎮</span>}
+      </span>
+      <span className="library-line-title">{game.title}</span>
+      {game.favorite && <span className="library-line-star">★</span>}
+      <span className="library-line-meta">{game.category}</span>
+    </button>
   )
 }
 

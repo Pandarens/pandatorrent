@@ -291,6 +291,63 @@ pub struct AppConfig {
     pub power: PowerConfig,
     #[serde(default)]
     pub seeding: SeedingConfig,
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
+    /// Ceiling on the "watch online" cache, in gigabytes. Zero means no limit.
+    #[serde(default = "default_cache_limit_gb")]
+    pub stream_cache_limit_gb: u32,
+}
+
+fn default_cache_limit_gb() -> u32 {
+    // Enough for a film and the next episode, not enough to swallow a disk
+    // while nobody is looking.
+    20
+}
+
+/// Different speed limits during part of the day.
+///
+/// The usual reason is to get out of the way while the machine is being used
+/// and let the torrents run at night.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleConfig {
+    pub enabled: bool,
+    /// Hour the window opens, 0–23.
+    pub from_hour: u32,
+    /// Hour it closes. Smaller than `from_hour` means it runs past midnight.
+    pub to_hour: u32,
+    /// Limits in force inside the window; zero means unlimited, as elsewhere.
+    pub download_limit_kbps: u32,
+    pub upload_limit_kbps: u32,
+}
+
+impl Default for ScheduleConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            from_hour: 9,
+            to_hour: 23,
+            download_limit_kbps: 0,
+            upload_limit_kbps: 2048,
+        }
+    }
+}
+
+impl ScheduleConfig {
+    /// Whether the given hour falls inside the window.
+    ///
+    /// A window that ends earlier than it starts runs through midnight, which
+    /// is the shape most people want: quiet by day, open at night.
+    pub fn covers(&self, hour: u32) -> bool {
+        if !self.enabled || self.from_hour == self.to_hour {
+            return false;
+        }
+        if self.from_hour < self.to_hour {
+            hour >= self.from_hour && hour < self.to_hour
+        } else {
+            hour >= self.from_hour || hour < self.to_hour
+        }
+    }
 }
 
 /// When to stop giving a finished download back to the swarm.
@@ -375,6 +432,8 @@ impl Default for AppConfig {
             player: PlayerConfig::default(),
             power: PowerConfig::default(),
             seeding: SeedingConfig::default(),
+            schedule: ScheduleConfig::default(),
+            stream_cache_limit_gb: default_cache_limit_gb(),
         }
     }
 }
@@ -399,6 +458,55 @@ impl AppConfig {
         std::fs::write(&tmp, serde_json::to_vec_pretty(self).unwrap())?;
         std::fs::rename(&tmp, path)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::ScheduleConfig;
+
+    fn window(from: u32, to: u32) -> ScheduleConfig {
+        ScheduleConfig {
+            enabled: true,
+            from_hour: from,
+            to_hour: to,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_daytime_window_covers_the_hours_between() {
+        let w = window(9, 23);
+        assert!(!w.covers(8));
+        assert!(w.covers(9));
+        assert!(w.covers(22));
+        // The closing hour is outside: 9–23 means "until 23:00".
+        assert!(!w.covers(23));
+    }
+
+    #[test]
+    fn a_window_that_ends_earlier_runs_through_midnight() {
+        // The shape most people want: quiet by day, open overnight.
+        let w = window(23, 7);
+        assert!(w.covers(23));
+        assert!(w.covers(0));
+        assert!(w.covers(6));
+        assert!(!w.covers(7));
+        assert!(!w.covers(12));
+    }
+
+    #[test]
+    fn a_schedule_that_is_off_covers_nothing() {
+        let mut w = window(0, 23);
+        w.enabled = false;
+        assert!(!w.covers(12));
+    }
+
+    #[test]
+    fn an_empty_window_covers_nothing() {
+        // Same hour both ends is not "all day"; it is a mistake, and treating
+        // it as all day would throttle everything around the clock.
+        assert!(!window(5, 5).covers(5));
     }
 }
 

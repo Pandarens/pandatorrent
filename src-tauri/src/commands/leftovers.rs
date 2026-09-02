@@ -168,3 +168,82 @@ pub async fn leftover_save(
     tracing::info!(%top, "просмотр сохранён в загрузки");
     Ok(to.to_string_lossy().to_string())
 }
+
+/// One leftover, as the cache accounting sees it.
+#[derive(Debug, Clone)]
+pub struct CacheEntry {
+    pub info_hash: String,
+    /// When the viewing started, so the oldest goes first.
+    pub added_at: i64,
+    pub bytes: u64,
+}
+
+/// Which leftovers to drop to get the cache back under its ceiling.
+///
+/// Oldest first, and only as many as it takes: a limit is a reason to free
+/// space, not a reason to wipe everything somebody meant to come back to.
+pub fn evictions(entries: &[CacheEntry], limit_bytes: u64) -> Vec<String> {
+    if limit_bytes == 0 {
+        return Vec::new();
+    }
+    let mut used: u64 = entries.iter().map(|e| e.bytes).sum();
+    if used <= limit_bytes {
+        return Vec::new();
+    }
+
+    let mut oldest: Vec<&CacheEntry> = entries.iter().collect();
+    oldest.sort_by_key(|e| e.added_at);
+
+    let mut drop = Vec::new();
+    for entry in oldest {
+        if used <= limit_bytes {
+            break;
+        }
+        used = used.saturating_sub(entry.bytes);
+        drop.push(entry.info_hash.clone());
+    }
+    drop
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::{CacheEntry, evictions};
+
+    fn entry(hash: &str, added_at: i64, gb: u64) -> CacheEntry {
+        CacheEntry {
+            info_hash: hash.into(),
+            added_at,
+            bytes: gb * 1024 * 1024 * 1024,
+        }
+    }
+
+    const GB: u64 = 1024 * 1024 * 1024;
+
+    #[test]
+    fn nothing_is_dropped_while_there_is_room() {
+        let entries = [entry("a", 1, 5), entry("b", 2, 5)];
+        assert!(evictions(&entries, 20 * GB).is_empty());
+    }
+
+    #[test]
+    fn the_oldest_goes_first_and_only_as_far_as_needed() {
+        let entries = [entry("new", 30, 8), entry("old", 10, 8), entry("mid", 20, 8)];
+        // 24 GB against a 20 GB ceiling: dropping one is enough.
+        assert_eq!(evictions(&entries, 20 * GB), vec!["old".to_string()]);
+    }
+
+    #[test]
+    fn several_go_when_one_is_not_enough() {
+        let entries = [entry("old", 10, 8), entry("mid", 20, 8), entry("new", 30, 8)];
+        assert_eq!(
+            evictions(&entries, 5 * GB),
+            vec!["old".to_string(), "mid".to_string(), "new".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_ceiling_of_zero_means_no_ceiling() {
+        let entries = [entry("a", 1, 500)];
+        assert!(evictions(&entries, 0).is_empty());
+    }
+}

@@ -42,14 +42,23 @@ pub async fn settings_set(
         crate::apply_autostart(&app, config.ui.autostart);
     }
 
+    // Speed limits are not in this list: the session applies them live, and
+    // asking for a restart to change a number was simply wrong.
     let restart_required = previous.network.listen_port != config.network.listen_port
         || previous.network.enable_dht != config.network.enable_dht
         || previous.network.enable_lsd != config.network.enable_lsd
         || previous.network.enable_upnp != config.network.enable_upnp
-        || previous.network.download_limit_kbps != config.network.download_limit_kbps
-        || previous.network.upload_limit_kbps != config.network.upload_limit_kbps
         || previous.network.max_peers_per_torrent != config.network.max_peers_per_torrent
         || previous.download_dir != config.download_dir;
+
+    if previous.network.download_limit_kbps != config.network.download_limit_kbps
+        || previous.network.upload_limit_kbps != config.network.upload_limit_kbps
+    {
+        state.engine.set_rate_limits(
+            config.network.download_limit_kbps,
+            config.network.upload_limit_kbps,
+        );
+    }
 
     let tracker_changed = previous.rutracker.host != config.rutracker.host
         || previous.network.tracker_proxy != config.network.tracker_proxy;
@@ -111,4 +120,45 @@ pub async fn logs_open(app: AppHandle, state: State<'_, Arc<AppState>>) -> AppRe
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(|e| AppError::msg(format!("не удалось открыть папку журнала: {e}")))
+}
+
+/// Writes the current settings to a file the user picked.
+///
+/// Reinstalling and rebuilding a dozen preferences by hand is the kind of
+/// small misery worth removing.
+#[tauri::command]
+pub async fn settings_export(state: State<'_, Arc<AppState>>, path: String) -> AppResult<()> {
+    let config = state.config_snapshot();
+    let text = serde_json::to_string_pretty(&config)
+        .map_err(|e| AppError::msg(format!("не удалось собрать настройки: {e}")))?;
+    std::fs::write(&path, text)
+        .map_err(|e| AppError::msg(format!("не удалось сохранить файл: {e}")))?;
+    tracing::info!(%path, "настройки выгружены");
+    Ok(())
+}
+
+/// Replaces the settings with what is in a file.
+///
+/// Anything the file does not mention keeps its default, so a file from an
+/// older version still loads instead of being rejected wholesale.
+#[tauri::command]
+pub async fn settings_import(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> AppResult<AppConfig> {
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| AppError::msg(format!("не удалось прочитать файл: {e}")))?;
+    let config: AppConfig = serde_json::from_str(&text)
+        .map_err(|e| AppError::msg(format!("это не файл настроек: {e}")))?;
+
+    crate::apply_autostart(&app, config.ui.autostart);
+    state
+        .engine
+        .set_rate_limits(config.network.download_limit_kbps, config.network.upload_limit_kbps);
+
+    *state.config.write() = config.clone();
+    state.save_config()?;
+    tracing::info!(%path, "настройки загружены из файла");
+    Ok(config)
 }

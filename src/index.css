@@ -2505,3 +2505,174 @@ body:has(.pw) {
   accent-color: var(--accent, #57c26a);
   cursor: pointer;
 }
+
+/* The row of controls above the download list. */
+.downloads-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.downloads-bar .input {
+  max-width: 320px;
+}
+
+.checkbox.inline {
+  margin: 0;
+  white-space: nowrap;
+}
+
+/* A download name that opens its file list. */
+.torrent-name.as-open {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.torrent-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  flex: none;
+  display: inline-block;
+  color: var(--muted, #9aa3ad);
+  transition: transform 0.15s ease;
+}
+
+.chevron.open {
+  transform: rotate(90deg);
+}
+
+/* The file list itself. */
+.files-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 10px 0 2px;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+.file-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.file-row.off {
+  opacity: 0.45;
+}
+
+.file-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-bar {
+  flex: none;
+  width: 90px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.file-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent, #57c26a);
+}
+
+.file-size {
+  flex: none;
+  min-width: 150px;
+  text-align: right;
+  color: var(--muted, #9aa3ad);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The library as a list, for collections too long to scan as tiles. */
+.library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-line:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.library-line-art {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 46px;
+  border-radius: 5px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.library-line-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-line-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-line-star {
+  flex: none;
+  color: var(--accent, #57c26a);
+}
+
+.library-line-meta {
+  flex: none;
+  color: var(--muted, #9aa3ad);
+  font-size: 12px;
+}

@@ -46,6 +46,8 @@ export interface TorrentFileEntry {
   components: string[]
   length: number
   included: boolean
+  /** Bytes of this file already on disk. */
+  downloaded: number
 }
 
 export interface TorrentDetails {
@@ -400,6 +402,15 @@ export interface SeedingConfig {
   stopWhenDone: boolean
 }
 
+/** Different speed limits during part of the day. */
+export interface ScheduleConfig {
+  enabled: boolean
+  fromHour: number
+  toHour: number
+  downloadLimitKbps: number
+  uploadLimitKbps: number
+}
+
 export interface AppConfig {
   downloadDir: string
   network: NetworkConfig
@@ -410,6 +421,9 @@ export interface AppConfig {
   player: PlayerConfig
   power: PowerConfig
   seeding: SeedingConfig
+  schedule: ScheduleConfig
+  /** Ceiling on the watch cache, in gigabytes; 0 means no limit. */
+  streamCacheLimitGb: number
 }
 
 export interface SettingsUpdate {

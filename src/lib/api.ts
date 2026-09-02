@@ -283,6 +283,8 @@ export const settings = {
   mirrors: () => invoke<string[]>('settings_mirrors'),
   appInfo: () => invoke<AppInfo>('app_info'),
   openLogs: () => invoke<void>('logs_open'),
+  exportTo: (path: string) => invoke<void>('settings_export', { path }),
+  importFrom: (path: string) => invoke<AppConfig>('settings_import', { path }),
 }
 
 // ------------------------------------------------------- application update

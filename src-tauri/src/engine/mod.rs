@@ -51,6 +51,9 @@ pub struct TorrentFileEntry {
     pub components: Vec<String>,
     pub length: u64,
     pub included: bool,
+    /// Bytes of this file already on disk, so a download can be inspected
+    /// file by file the way any torrent client shows it.
+    pub downloaded: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +200,21 @@ impl Engine {
         ))
     }
 
+    /// Changes the speed limits of a running session.
+    ///
+    /// These do not need a restart, contrary to what the settings screen used
+    /// to claim: the session exposes its limiter, and a schedule that could
+    /// only take effect at launch would be no schedule at all.
+    pub fn set_rate_limits(&self, download_kbps: u32, upload_kbps: u32) {
+        self.session
+            .ratelimits
+            .set_download_bps(kbps_to_bps(download_kbps));
+        self.session
+            .ratelimits
+            .set_upload_bps(kbps_to_bps(upload_kbps));
+        tracing::info!(download_kbps, upload_kbps, "лимиты скорости применены");
+    }
+
     /// The original `.torrent` of something already in the session.
     ///
     /// Needed to re-add a torrent, which is how a re-check is done: librqbit
@@ -250,6 +268,7 @@ impl Engine {
             .api_torrent_details(idx)
             .map_err(|e| AppError::Other(e.to_string()))?;
         let progress = self.progress_one(info_hash).ok();
+        let done = self.file_progress(info_hash).unwrap_or_default();
         Ok(TorrentDetails {
             info_hash: d.info_hash,
             id: d.id,
@@ -266,6 +285,7 @@ impl Engine {
                     components: f.components,
                     length: f.length,
                     included: f.included,
+                    downloaded: done.get(index).copied().unwrap_or(0),
                 })
                 .collect(),
             progress,

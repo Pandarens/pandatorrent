@@ -52,7 +52,12 @@ function Shell() {
   // settings, and only after something was actually downloading — otherwise
   // opening the application with nothing to do would count as "finished".
   const [shutdownReason, setShutdownReason] = useState<string | null>(null)
+  // Asked for on the downloads page, for this batch only — deliberately not
+  // saved anywhere, because "just this once" is the whole point.
+  const [shutdownOnce, setShutdownOnce] = useState(false)
   const wasBusy = useRef(false)
+  const onceRef = useRef(false)
+  onceRef.current = shutdownOnce
 
   useEffect(() => {
     const un = onProgress((list) => {
@@ -60,8 +65,9 @@ function Shell() {
         wasBusy.current = true
         return
       }
-      if (wasBusy.current && list.length > 0 && config?.power.afterDownloads) {
+      if (wasBusy.current && list.length > 0 && (config?.power.afterDownloads || onceRef.current)) {
         wasBusy.current = false
+        setShutdownOnce(false)
         setShutdownReason('Все загрузки завершены')
       }
     })
@@ -88,7 +94,9 @@ function Shell() {
           <LibraryView selectedHash={selectedHash} onSelect={setSelectedHash} />
         )}
         {view === 'search' && <SearchView onOpenLibrary={openGame} />}
-        {view === 'downloads' && <DownloadsView />}
+        {view === 'downloads' && (
+          <DownloadsView shutdownOnce={shutdownOnce} onShutdownOnce={setShutdownOnce} />
+        )}
         {view === 'updates' && <UpdatesView />}
         {view === 'settings' && <SettingsView />}
       </main>

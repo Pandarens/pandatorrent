@@ -9,6 +9,7 @@ import { useStore } from '../lib/store'
 import type { TorrentProgress, TorrentView } from '../lib/types'
 import { Empty, Modal, ProgressBar } from '../components/ui'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { TorrentFiles } from '../components/TorrentFiles'
 
 type Filter = 'all' | 'active' | 'done'
 
@@ -25,10 +26,18 @@ async function tryTrack(infoHash: string): Promise<number | null> {
   }
 }
 
-export function DownloadsView() {
+export function DownloadsView({
+  shutdownOnce = false,
+  onShutdownOnce,
+}: {
+  /** Turn the computer off when this batch finishes — just this once. */
+  shutdownOnce?: boolean
+  onShutdownOnce?: (on: boolean) => void
+}) {
   const { torrents, progress, refreshAll, toast, reportError } = useStore()
   const [filter, setFilter] = useState<Filter>('all')
   const [addOpen, setAddOpen] = useState(false)
+  const [search, setSearch] = useState('')
 
   const rows = useMemo(() => {
     return torrents
@@ -38,7 +47,11 @@ export function DownloadsView() {
         const finished = p?.finished ?? false
         return filter === 'done' ? finished : !finished
       })
-  }, [torrents, progress, filter])
+      .filter(({ t }) => {
+        const needle = search.trim().toLowerCase()
+        return needle === '' || t.name.toLowerCase().includes(needle)
+      })
+  }, [torrents, progress, filter, search])
 
   async function addFromFile() {
     const picked = await open({
@@ -84,6 +97,30 @@ export function DownloadsView() {
         </button>
       </div>
 
+      <div className="downloads-bar">
+        <input
+          className="input"
+          type="search"
+          placeholder="Найти среди загрузок"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="spacer" />
+        {onShutdownOnce && (
+          <label
+            className="checkbox inline"
+            title="Только для этих загрузок — настройка не сохраняется"
+          >
+            <input
+              type="checkbox"
+              checked={shutdownOnce}
+              onChange={(e) => onShutdownOnce(e.target.checked)}
+            />
+            <span>Выключить компьютер по завершении</span>
+          </label>
+        )}
+      </div>
+
       {rows.length === 0 ? (
         <Empty
           icon="⬇"
@@ -109,6 +146,7 @@ function TorrentRow({
   const { refreshAll, toast, reportError } = useStore()
   const [busy, setBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [open, setOpen] = useState(false)
 
   const state = progress?.state ?? 'paused'
   const finished = progress?.finished ?? torrent.completedAt != null
@@ -134,9 +172,14 @@ function TorrentRow({
   return (
     <div className="torrent-row">
       <div className="torrent-head">
-        <span className="torrent-name" title={torrent.name}>
-          {torrent.name}
-        </span>
+        <button
+          className="torrent-name as-open"
+          title={open ? 'Свернуть' : 'Показать файлы раздачи'}
+          onClick={() => setOpen(!open)}
+        >
+          <span className={open ? 'chevron open' : 'chevron'}>›</span>
+          <span className="torrent-name-text">{torrent.name}</span>
+        </button>
         <span className={finished ? 'tag accent' : 'tag'}>
           {stateLabel(state, finished, hasError)}
         </span>
@@ -185,6 +228,8 @@ function TorrentRow({
           </button>
         </div>
       </div>
+
+      {open && <TorrentFiles infoHash={torrent.infoHash} />}
 
       {confirming && (
         <ConfirmDialog

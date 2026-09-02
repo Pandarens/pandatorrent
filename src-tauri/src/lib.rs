@@ -79,6 +79,7 @@ pub fn run() {
             spawn_progress_emitter(app.handle().clone(), state.clone());
             spawn_browser_reaper(state.clone());
             spawn_temp_watch_reaper(state.clone());
+            spawn_schedule_watcher(state.clone());
 
             // Launched by double-clicking a .torrent or a magnet link.
             let argv: Vec<String> = std::env::args().collect();
@@ -169,6 +170,8 @@ pub fn run() {
             commands::settings::settings_mirrors,
             commands::settings::app_info,
             commands::settings::logs_open,
+            commands::settings::settings_export,
+            commands::settings::settings_import,
             commands::leftovers::leftovers_list,
             commands::leftovers::leftover_resume,
             commands::leftovers::leftover_drop,
@@ -575,6 +578,51 @@ fn spawn_browser_reaper(state: Arc<AppState>) {
     });
 }
 
+/// Keeps the "watch online" cache under its ceiling.
+///
+/// Leftovers are kept until somebody decides about them, which is right — but
+/// kept forever they would fill a disk. The oldest go first, and never the one
+/// being watched.
+async fn enforce_cache_limit(state: &Arc<AppState>) {
+    use crate::commands::leftovers::{CacheEntry, evictions};
+
+    let limit_gb = state.config.read().stream_cache_limit_gb as u64;
+    if limit_gb == 0 {
+        return;
+    }
+
+    let cache = state.stream_cache_dir();
+    let current = state.temp_watch.lock().as_ref().map(|w| w.info_hash.clone());
+    let Ok(rows) = state.db.list_torrents() else {
+        return;
+    };
+    let progress = state.engine.progress_all();
+
+    let entries: Vec<CacheEntry> = rows
+        .into_iter()
+        .filter(|r| std::path::Path::new(&r.output_folder).starts_with(&cache))
+        .filter(|r| current.as_deref() != Some(r.info_hash.as_str()))
+        .map(|r| CacheEntry {
+            bytes: progress
+                .iter()
+                .find(|p| p.info_hash.eq_ignore_ascii_case(&r.info_hash))
+                .map(|p| p.progress_bytes)
+                .unwrap_or(0),
+            added_at: r.added_at,
+            info_hash: r.info_hash,
+        })
+        .collect();
+
+    for info_hash in evictions(&entries, limit_gb * 1024 * 1024 * 1024) {
+        tracing::info!(%info_hash, "кэш просмотра переполнен, убираем самый старый");
+        if let Err(e) = state.engine.delete(&info_hash).await {
+            tracing::warn!("не удалось убрать старый просмотр: {e}");
+            continue;
+        }
+        let _ = state.db.delete_torrent(&info_hash);
+    }
+}
+
 /// Writes down how far into the film the viewer has got.
 ///
 /// Called on the sweep rather than on closing: the player can go away without
@@ -601,6 +649,39 @@ fn save_watch_position(state: &Arc<AppState>) {
     ) {
         tracing::warn!("не удалось сохранить позицию просмотра: {e}");
     }
+}
+
+/// Keeps the speed limits in step with the clock.
+///
+/// Checked every minute rather than slept until the boundary: the machine can
+/// suspend, the clock can move, and a loop that woke up once a day would get
+/// both of those wrong.
+fn spawn_schedule_watcher(state: Arc<AppState>) {
+    use chrono::Timelike;
+
+    tauri::async_runtime::spawn(async move {
+        let mut applied: Option<(u32, u32)> = None;
+        loop {
+            let (schedule, network) = {
+                let cfg = state.config.read();
+                (cfg.schedule.clone(), cfg.network.clone())
+            };
+
+            let hour = chrono::Local::now().hour();
+            let wanted = if schedule.covers(hour) {
+                (schedule.download_limit_kbps, schedule.upload_limit_kbps)
+            } else {
+                (network.download_limit_kbps, network.upload_limit_kbps)
+            };
+
+            if applied != Some(wanted) {
+                state.engine.set_rate_limits(wanted.0, wanted.1);
+                applied = Some(wanted);
+            }
+
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        }
+    });
 }
 
 /// How long a "just watch it" download survives after the film is closed.
@@ -630,6 +711,7 @@ fn spawn_temp_watch_reaper(state: Arc<AppState>) {
             if playing {
                 save_watch_position(&state);
             }
+            enforce_cache_limit(&state).await;
             let mut to_pause = None;
             let mut expired = None;
 
