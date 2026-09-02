@@ -68,7 +68,22 @@ commands.allow = [
   "player_playback",
   "history_list",
   "history_remove",
-  "history_clear"
+  "history_clear",
+  "torrent_recheck",
+  "torrent_set_no_seeding",
+  "torrent_set_forced",
+  "torrent_peers",
+  "torrent_create",
+  "session_stats",
+  "logs_open",
+  "settings_export",
+  "settings_import",
+  "leftovers_list",
+  "leftover_resume",
+  "leftover_drop",
+  "leftover_save",
+  "system_shutdown",
+  "system_shutdown_cancel"
 ]
 
 [[permission]]

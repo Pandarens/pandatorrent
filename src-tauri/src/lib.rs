@@ -894,3 +894,69 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.set_focus();
     }
 }
+
+#[cfg(test)]
+mod acl_tests {
+    //! Keeps the command list and the ACL from drifting apart.
+    //!
+    //! A command that is registered but not granted compiles, launches, and
+    //! looks entirely healthy — then fails the moment somebody presses the
+    //! button, with "not allowed by ACL". Fifteen commands were in that state
+    //! before this test existed.
+
+    /// Command names inside `generate_handler![...]`.
+    fn registered() -> Vec<String> {
+        let source = include_str!("lib.rs");
+        let start = source
+            .find("generate_handler![")
+            .expect("нет списка команд")
+            + "generate_handler![".len();
+        let end = start + source[start..].find(']').expect("список не закрыт");
+        source[start..end]
+            .split(',')
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(|c| c.rsplit("::").next().unwrap_or(c).to_string())
+            .collect()
+    }
+
+    /// Every name quoted in the permission file.
+    fn granted() -> Vec<String> {
+        include_str!("../permissions/app.toml")
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .filter(|s| {
+                !s.is_empty()
+                    && s.chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            })
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn every_registered_command_is_granted() {
+        let granted = granted();
+        let ungranted: Vec<String> = registered()
+            .into_iter()
+            .filter(|c| !granted.contains(c))
+            .collect();
+        assert!(
+            ungranted.is_empty(),
+            "эти команды зарегистрированы, но не разрешены в permissions/app.toml: {ungranted:?}"
+        );
+    }
+
+    #[test]
+    fn nothing_is_granted_that_does_not_exist() {
+        // A stale grant is a permission nobody revoked, which is worth
+        // noticing even though it cannot be exploited on its own.
+        let registered = registered();
+        let stale: Vec<String> = granted()
+            .into_iter()
+            .filter(|c| !registered.contains(c))
+            .collect();
+        assert!(stale.is_empty(), "разрешены несуществующие команды: {stale:?}");
+    }
+}
