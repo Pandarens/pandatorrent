@@ -437,6 +437,55 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
 }
 
 /// Pushes live stats to the UI and turns "finished" into a one-shot event.
+/// Keeps no more than the allowed number of downloads running at once.
+///
+/// Anything the seeding rules have stopped counts as untouchable here, exactly
+/// like a download somebody paused by hand: two mechanisms taking turns to
+/// start and stop the same torrent would be worse than either alone.
+async fn apply_queue(
+    state: &Arc<AppState>,
+    progress: &[engine::TorrentProgress],
+    seeding_stopped: &HashSet<String>,
+) {
+    use crate::commands::torrents::{QueueItem, queue_plan};
+
+    let max_active = state.config.read().max_active_downloads;
+    let Ok(records) = state.db.list_torrents() else {
+        return;
+    };
+
+    let items: Vec<QueueItem> = progress
+        .iter()
+        .filter_map(|p| {
+            let record = records
+                .iter()
+                .find(|r| r.info_hash.eq_ignore_ascii_case(&p.info_hash))?;
+            Some(QueueItem {
+                user_paused: record.user_paused
+                    || seeding_stopped.contains(&p.info_hash)
+                    || (p.finished && record.no_seeding),
+                info_hash: p.info_hash.clone(),
+                added_at: record.added_at,
+                finished: p.finished,
+                running: p.state != "paused",
+            })
+        })
+        .collect();
+
+    let (start, pause) = queue_plan(&items, max_active);
+    for info_hash in pause {
+        tracing::info!(%info_hash, "очередь: ждёт своей очереди");
+        if let Err(e) = state.engine.pause(&info_hash).await {
+            tracing::warn!("не удалось приостановить по очереди: {e}");
+        }
+    }
+    for info_hash in start {
+        if let Err(e) = state.engine.resume(&info_hash).await {
+            tracing::warn!("не удалось запустить по очереди: {e}");
+        }
+    }
+}
+
 /// Pauses finished torrents that have given back as much as was asked of them.
 async fn stop_over_seeded(
     state: &Arc<AppState>,
@@ -556,6 +605,7 @@ fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
             }
 
             stop_over_seeded(&state, &progress, &mut stopped).await;
+            apply_queue(&state, &progress, &stopped).await;
 
             // Coming back from the tray gets an immediate update rather than
             // showing figures up to five seconds stale.

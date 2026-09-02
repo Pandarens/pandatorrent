@@ -54,6 +54,7 @@ pub fn build_views(state: &AppState) -> AppResult<Vec<TorrentView>> {
                 topic_id: None,
                 // Not in the database at all, so it carries no preference.
                 no_seeding: false,
+                user_paused: false,
             },
             progress: Some(p),
         });
@@ -255,11 +256,14 @@ pub async fn add_path(state: &AppState, path: &str) -> AppResult<String> {
 
 #[tauri::command]
 pub async fn torrent_pause(state: State<'_, Arc<AppState>>, info_hash: String) -> AppResult<()> {
+    // Remembered, so the queue does not helpfully start it again.
+    let _ = state.db.set_user_paused(&info_hash, true);
     state.engine.pause(&info_hash).await
 }
 
 #[tauri::command]
 pub async fn torrent_resume(state: State<'_, Arc<AppState>>, info_hash: String) -> AppResult<()> {
+    let _ = state.db.set_user_paused(&info_hash, false);
     state.engine.resume(&info_hash).await
 }
 
@@ -366,5 +370,109 @@ pub fn install_dir(added: &AddedTorrent) -> String {
             .to_string_lossy()
             .to_string(),
         _ => added.output_folder.clone(),
+    }
+}
+
+/// One download, as the queue sees it.
+#[derive(Debug, Clone)]
+pub struct QueueItem {
+    pub info_hash: String,
+    /// Older ones get their turn first.
+    pub added_at: i64,
+    pub finished: bool,
+    /// A person stopped it, so the queue must not touch it.
+    pub user_paused: bool,
+    pub running: bool,
+}
+
+/// What the queue should start and what it should hold back.
+///
+/// Oldest first, so a download that has been waiting does not keep losing its
+/// place to whatever was added last. A finished torrent is seeding rather than
+/// downloading and never occupies a slot.
+pub fn queue_plan(items: &[QueueItem], max_active: u32) -> (Vec<String>, Vec<String>) {
+    if max_active == 0 {
+        // No limit: everything a person has not paused should be running.
+        let start = items
+            .iter()
+            .filter(|i| !i.user_paused && !i.running)
+            .map(|i| i.info_hash.clone())
+            .collect();
+        return (start, Vec::new());
+    }
+
+    let mut waiting: Vec<&QueueItem> = items
+        .iter()
+        .filter(|i| !i.finished && !i.user_paused)
+        .collect();
+    waiting.sort_by_key(|i| i.added_at);
+
+    let mut start = Vec::new();
+    let mut pause = Vec::new();
+    for (place, item) in waiting.iter().enumerate() {
+        let should_run = (place as u32) < max_active;
+        if should_run && !item.running {
+            start.push(item.info_hash.clone());
+        } else if !should_run && item.running {
+            pause.push(item.info_hash.clone());
+        }
+    }
+
+    // A finished torrent left paused by the queue earlier is free to seed.
+    for item in items.iter().filter(|i| i.finished && !i.user_paused && !i.running) {
+        start.push(item.info_hash.clone());
+    }
+    (start, pause)
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::{QueueItem, queue_plan};
+
+    fn item(hash: &str, added_at: i64, running: bool) -> QueueItem {
+        QueueItem {
+            info_hash: hash.into(),
+            added_at,
+            finished: false,
+            user_paused: false,
+            running,
+        }
+    }
+
+    #[test]
+    fn without_a_limit_everything_runs() {
+        let items = [item("a", 1, false), item("b", 2, true)];
+        let (start, pause) = queue_plan(&items, 0);
+        assert_eq!(start, vec!["a".to_string()]);
+        assert!(pause.is_empty());
+    }
+
+    #[test]
+    fn the_oldest_downloads_get_the_slots() {
+        let items = [item("new", 30, true), item("old", 10, false), item("mid", 20, true)];
+        let (start, pause) = queue_plan(&items, 2);
+        // "old" and "mid" are the two oldest, so "new" gives up its slot.
+        assert_eq!(start, vec!["old".to_string()]);
+        assert_eq!(pause, vec!["new".to_string()]);
+    }
+
+    #[test]
+    fn a_download_someone_paused_is_never_restarted() {
+        // The one thing a queue must not do.
+        let mut items = vec![item("a", 1, false)];
+        items[0].user_paused = true;
+        let (start, pause) = queue_plan(&items, 5);
+        assert!(start.is_empty());
+        assert!(pause.is_empty());
+    }
+
+    #[test]
+    fn seeding_does_not_occupy_a_slot() {
+        let mut items = vec![item("done", 1, false), item("busy", 2, true)];
+        items[0].finished = true;
+        let (start, pause) = queue_plan(&items, 1);
+        // The finished one is started to seed; the download keeps its slot.
+        assert_eq!(start, vec!["done".to_string()]);
+        assert!(pause.is_empty());
     }
 }

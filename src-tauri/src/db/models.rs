@@ -48,6 +48,9 @@ pub struct TorrentRecord {
     /// Stop this one as soon as it is downloaded, whatever the global rule.
     #[serde(default)]
     pub no_seeding: bool,
+    /// A person paused it, so the queue must leave it alone.
+    #[serde(default)]
+    pub user_paused: bool,
 }
 
 /// A card in the Steam-like library view.

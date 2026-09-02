@@ -296,6 +296,9 @@ pub struct AppConfig {
     /// Ceiling on the "watch online" cache, in gigabytes. Zero means no limit.
     #[serde(default = "default_cache_limit_gb")]
     pub stream_cache_limit_gb: u32,
+    /// How many downloads may run at once. Zero means all of them.
+    #[serde(default)]
+    pub max_active_downloads: u32,
 }
 
 fn default_cache_limit_gb() -> u32 {
@@ -434,6 +437,7 @@ impl Default for AppConfig {
             seeding: SeedingConfig::default(),
             schedule: ScheduleConfig::default(),
             stream_cache_limit_gb: default_cache_limit_gb(),
+            max_active_downloads: 0,
         }
     }
 }

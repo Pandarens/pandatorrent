@@ -617,6 +617,27 @@ export function SettingsView() {
       </div>
 
       <div className="card">
+        <h3 className="card-title">Очередь загрузок</h3>
+        <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
+          Сколько раздач качается одновременно. Остальные ждут своей очереди —
+          сначала те, что добавлены раньше. Раздача готового места в очереди не
+          занимает. Ноль снимает ограничение.
+        </p>
+        <label className="field" style={{ maxWidth: 280 }}>
+          <span>Одновременно качать, штук</span>
+          <input
+            type="number"
+            min={0}
+            max={50}
+            value={draft.maxActiveDownloads}
+            onChange={(e) =>
+              patch((d) => (d.maxActiveDownloads = Math.max(0, Number(e.target.value) || 0)))
+            }
+          />
+        </label>
+      </div>
+
+      <div className="card">
         <h3 className="card-title">Скорость по расписанию</h3>
         <p style={{ color: 'var(--muted)', fontSize: 12.5, marginTop: 0 }}>
           В указанные часы действуют другие ограничения — например, потише днём и

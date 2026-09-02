@@ -71,6 +71,8 @@ export interface TorrentView {
   topicId: number | null
   /** Stop this release as soon as it is downloaded. */
   noSeeding: boolean
+  /** A person paused it, as opposed to the queue doing so. */
+  userPaused: boolean
   progress: TorrentProgress | null
 }
 
@@ -426,6 +428,8 @@ export interface AppConfig {
   schedule: ScheduleConfig
   /** Ceiling on the watch cache, in gigabytes; 0 means no limit. */
   streamCacheLimitGb: number
+  /** How many downloads may run at once; 0 means all of them. */
+  maxActiveDownloads: number
 }
 
 export interface SettingsUpdate {

@@ -13,6 +13,15 @@ import { TorrentFiles } from '../components/TorrentFiles'
 import { CreateTorrentModal } from '../components/CreateTorrentModal'
 
 type Filter = 'all' | 'active' | 'done'
+type SortKey = 'added' | 'name' | 'size' | 'progress' | 'speed'
+
+const SORT_LABELS: Record<SortKey, string> = {
+  added: 'По добавлению',
+  name: 'По названию',
+  size: 'По размеру',
+  progress: 'По прогрессу',
+  speed: 'По скорости',
+}
 
 /**
  * Asks the tracker API whether this info hash belongs to a known topic, so a
@@ -40,6 +49,8 @@ export function DownloadsView({
   const [addOpen, setAddOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<SortKey>('added')
+  const [descending, setDescending] = useState(true)
 
   const rows = useMemo(() => {
     return torrents
@@ -53,7 +64,32 @@ export function DownloadsView({
         const needle = search.trim().toLowerCase()
         return needle === '' || t.name.toLowerCase().includes(needle)
       })
-  }, [torrents, progress, filter, search])
+      .sort((a, b) => {
+        const size = (r: typeof a) => r.p?.totalBytes || r.t.totalBytes
+        const share = (r: typeof a) => {
+          const total = size(r)
+          return total > 0 ? (r.p?.progressBytes ?? 0) / total : 0
+        }
+        let by = 0
+        switch (sort) {
+          case 'name':
+            by = a.t.name.localeCompare(b.t.name, 'ru')
+            break
+          case 'size':
+            by = size(a) - size(b)
+            break
+          case 'progress':
+            by = share(a) - share(b)
+            break
+          case 'speed':
+            by = (a.p?.downloadSpeedBps ?? 0) - (b.p?.downloadSpeedBps ?? 0)
+            break
+          default:
+            by = a.t.addedAt - b.t.addedAt
+        }
+        return descending ? -by : by
+      })
+  }, [torrents, progress, filter, search, sort, descending])
 
   async function addFromFile() {
     const picked = await open({
@@ -110,6 +146,26 @@ export function DownloadsView({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+        <select
+          className="select"
+          value={sort}
+          title="Порядок в списке"
+          onChange={(e) => setSort(e.target.value as SortKey)}
+        >
+          {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+            <option key={k} value={k}>
+              {SORT_LABELS[k]}
+            </option>
+          ))}
+        </select>
+        <button
+          className="btn sm"
+          title={descending ? 'Сначала большие' : 'Сначала меньшие'}
+          onClick={() => setDescending((v) => !v)}
+        >
+          {descending ? '↓' : '↑'}
+        </button>
+
         <div className="spacer" />
         {onShutdownOnce && (
           <label
@@ -133,7 +189,32 @@ export function DownloadsView({
           hint="Добавьте магнет-ссылку, .torrent-файл или найдите раздачу через поиск."
         />
       ) : (
-        rows.map(({ t, p }) => <TorrentRow key={t.infoHash} torrent={t} progress={p} />)
+        <>
+          {rows
+            .filter(({ p, t }) => !(p?.finished ?? t.completedAt != null))
+            .map(({ t, p }) => (
+              <TorrentRow key={t.infoHash} torrent={t} progress={p} />
+            ))}
+
+          {/* Finished releases keep seeding, but they are not what anyone is
+              watching — so they sit below instead of among the active ones. */}
+          {(() => {
+            const done = rows.filter(({ p, t }) => p?.finished ?? t.completedAt != null)
+            if (done.length === 0) return null
+            return (
+              <>
+                <div className="section-split">
+                  <span>Готово</span>
+                  <span className="section-count">{done.length}</span>
+                  <span className="section-line" />
+                </div>
+                {done.map(({ t, p }) => (
+                  <TorrentRow key={t.infoHash} torrent={t} progress={p} />
+                ))}
+              </>
+            )
+          })()}
+        </>
       )}
 
       {addOpen && <AddUrlModal onClose={() => setAddOpen(false)} />}
@@ -187,7 +268,11 @@ function TorrentRow({
           <span className="torrent-name-text">{torrent.name}</span>
         </button>
         <span className={finished ? 'tag accent' : 'tag'}>
-          {stateLabel(state, finished, hasError)}
+          {/* A queue-held download is not the same as one somebody stopped,
+              and calling both "пауза" hides why nothing is happening. */}
+          {state === 'paused' && !finished && !torrent.userPaused
+            ? 'В очереди'
+            : stateLabel(state, finished, hasError)}
         </span>
         <div className="torrent-actions">
           {state === 'paused' ? (
