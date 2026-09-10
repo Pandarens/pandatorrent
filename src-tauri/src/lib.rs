@@ -446,14 +446,13 @@ fn init_state(app: &AppHandle) -> Result<Arc<AppState>, Box<dyn std::error::Erro
 async fn apply_queue(
     state: &Arc<AppState>,
     progress: &[engine::TorrentProgress],
+    records: &[db::models::TorrentRecord],
     seeding_stopped: &HashSet<String>,
 ) {
     use crate::commands::torrents::{QueueItem, queue_plan};
 
     let max_active = state.config.read().max_active_downloads;
-    let Ok(records) = state.db.list_torrents() else {
-        return;
-    };
+    let cache = state.stream_cache_dir();
 
     let items: Vec<QueueItem> = progress
         .iter()
@@ -469,6 +468,7 @@ async fn apply_queue(
                 added_at: record.added_at,
                 finished: p.finished,
                 forced: record.forced,
+                scratch: std::path::Path::new(&record.output_folder).starts_with(&cache),
                 running: p.state != "paused",
             })
         })
@@ -492,12 +492,17 @@ async fn apply_queue(
 async fn stop_over_seeded(
     state: &Arc<AppState>,
     progress: &[engine::TorrentProgress],
+    records: &[db::models::TorrentRecord],
     stopped: &mut HashSet<String>,
 ) {
     let seeding = state.config.read().seeding.clone();
     // Individual releases can be marked "download, then stop" even when the
     // global rules are off, so this cannot bail out on the config alone.
-    let marked = state.db.no_seeding_hashes().unwrap_or_default();
+    let marked: HashSet<String> = records
+        .iter()
+        .filter(|r| r.no_seeding)
+        .map(|r| r.info_hash.to_uppercase())
+        .collect();
     if !seeding.is_active() && marked.is_empty() {
         // A limit lifted while running frees everything paused for it.
         stopped.clear();
@@ -606,8 +611,17 @@ fn spawn_progress_emitter(app: AppHandle, state: Arc<AppState>) {
                 let _ = app.emit(events::TORRENT_COMPLETED, p);
             }
 
-            stop_over_seeded(&state, &progress, &mut stopped).await;
-            apply_queue(&state, &progress, &stopped).await;
+            // One read of the database per sweep, shared by every rule below.
+            // Each used to query on its own, which came to three queries a
+            // second for a list that changes a few times a day.
+            let records = state.db.list_torrents().unwrap_or_default();
+            // Hashes that have left the session must not linger as "stopped",
+            // or a re-added torrent would inherit a decision made about its
+            // predecessor.
+            stopped.retain(|h| progress.iter().any(|p| &p.info_hash == h));
+
+            stop_over_seeded(&state, &progress, &records, &mut stopped).await;
+            apply_queue(&state, &progress, &records, &stopped).await;
 
             // Coming back from the tray gets an immediate update rather than
             // showing figures up to five seconds stale.
@@ -721,17 +735,8 @@ fn spawn_schedule_watcher(state: Arc<AppState>) {
     tauri::async_runtime::spawn(async move {
         let mut applied: Option<(u32, u32)> = None;
         loop {
-            let (schedule, network) = {
-                let cfg = state.config.read();
-                (cfg.schedule.clone(), cfg.network.clone())
-            };
-
             let hour = chrono::Local::now().hour();
-            let wanted = if schedule.covers(hour) {
-                (schedule.download_limit_kbps, schedule.upload_limit_kbps)
-            } else {
-                (network.download_limit_kbps, network.upload_limit_kbps)
-            };
+            let wanted = state.config.read().effective_limits(hour);
 
             if applied != Some(wanted) {
                 state.engine.set_rate_limits(wanted.0, wanted.1);

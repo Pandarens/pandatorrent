@@ -406,6 +406,11 @@ pub struct QueueItem {
     /// A person insisted on this one: it runs whatever the limit says, and
     /// takes none of the places, so two can be forced past a limit of one.
     pub forced: bool,
+    /// A "watch online" scratch copy. Its pausing and resuming belong to the
+    /// player housekeeping, and the queue must not touch it either way:
+    /// restarting one the player had just paused kept a closed film
+    /// downloading, which is exactly what watching online promised not to do.
+    pub scratch: bool,
     pub running: bool,
 }
 
@@ -415,6 +420,9 @@ pub struct QueueItem {
 /// place to whatever was added last. A finished torrent is seeding rather than
 /// downloading and never occupies a slot.
 pub fn queue_plan(items: &[QueueItem], max_active: u32) -> (Vec<String>, Vec<String>) {
+    // Scratch copies are somebody else's business from start to finish.
+    let items: Vec<&QueueItem> = items.iter().filter(|i| !i.scratch).collect();
+
     if max_active == 0 {
         // No limit: everything a person has not paused should be running.
         let start = items
@@ -436,6 +444,7 @@ pub fn queue_plan(items: &[QueueItem], max_active: u32) -> (Vec<String>, Vec<Str
 
     let mut waiting: Vec<&QueueItem> = items
         .iter()
+        .copied()
         .filter(|i| !i.finished && !i.user_paused && !i.forced)
         .collect();
     waiting.sort_by_key(|i| i.added_at);
@@ -470,8 +479,27 @@ mod queue_tests {
             finished: false,
             user_paused: false,
             forced: false,
+            scratch: false,
             running,
         }
+    }
+
+    #[test]
+    fn a_scratch_copy_is_never_started_or_stopped_by_the_queue() {
+        // The regression this guards: the player pauses a closed film, and
+        // the queue, seeing something not running and not marked paused,
+        // started it straight back up, every second.
+        let mut items = vec![item("film", 1, false), item("dl", 2, true)];
+        items[0].scratch = true;
+        let (start, pause) = queue_plan(&items, 0);
+        assert!(start.is_empty(), "queue restarted a scratch copy: {start:?}");
+        assert!(pause.is_empty());
+
+        // Nor does it take a place when a limit is on.
+        items[0].running = true;
+        let (start, pause) = queue_plan(&items, 1);
+        assert!(start.is_empty());
+        assert!(pause.is_empty(), "queue made room for a scratch copy: {pause:?}");
     }
 
     #[test]

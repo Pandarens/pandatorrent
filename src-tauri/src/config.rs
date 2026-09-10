@@ -336,6 +336,27 @@ impl Default for ScheduleConfig {
     }
 }
 
+impl AppConfig {
+    /// The speed limits that should be in force at the given hour.
+    ///
+    /// Both the settings screen and the schedule watcher go through this, so
+    /// changing a limit while the schedule window is open no longer applies
+    /// the wrong pair for a minute until the watcher notices.
+    pub fn effective_limits(&self, hour: u32) -> (u32, u32) {
+        if self.schedule.covers(hour) {
+            (
+                self.schedule.download_limit_kbps,
+                self.schedule.upload_limit_kbps,
+            )
+        } else {
+            (
+                self.network.download_limit_kbps,
+                self.network.upload_limit_kbps,
+            )
+        }
+    }
+}
+
 impl ScheduleConfig {
     /// Whether the given hour falls inside the window.
     ///
@@ -504,6 +525,19 @@ mod schedule_tests {
         let mut w = window(0, 23);
         w.enabled = false;
         assert!(!w.covers(12));
+    }
+
+    #[test]
+    fn the_window_decides_which_pair_of_limits_applies() {
+        let mut cfg = super::super::AppConfig::default();
+        cfg.network.download_limit_kbps = 100;
+        cfg.network.upload_limit_kbps = 200;
+        cfg.schedule = window(22, 6);
+        cfg.schedule.download_limit_kbps = 0;
+        cfg.schedule.upload_limit_kbps = 50;
+
+        assert_eq!(cfg.effective_limits(12), (100, 200));
+        assert_eq!(cfg.effective_limits(23), (0, 50));
     }
 
     #[test]

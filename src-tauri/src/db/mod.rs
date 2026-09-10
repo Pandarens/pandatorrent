@@ -6,7 +6,6 @@
 
 pub mod models;
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -253,19 +252,6 @@ impl Db {
             params![info_hash, on as i64],
         )?;
         Ok(())
-    }
-
-    /// Releases marked "do not seed", as upper-case info hashes.
-    pub fn no_seeding_hashes(&self) -> AppResult<HashSet<String>> {
-        let conn = self.conn.lock();
-        let mut stmt =
-            conn.prepare("SELECT info_hash FROM torrents WHERE no_seeding = 1")?;
-        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
-        Ok(rows
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|h| h.to_uppercase())
-            .collect())
     }
 
     pub fn upsert_torrent(

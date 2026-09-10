@@ -53,11 +53,11 @@ pub async fn settings_set(
 
     if previous.network.download_limit_kbps != config.network.download_limit_kbps
         || previous.network.upload_limit_kbps != config.network.upload_limit_kbps
+        || previous.schedule != config.schedule
     {
-        state.engine.set_rate_limits(
-            config.network.download_limit_kbps,
-            config.network.upload_limit_kbps,
-        );
+        use chrono::Timelike;
+        let (down, up) = config.effective_limits(chrono::Local::now().hour());
+        state.engine.set_rate_limits(down, up);
     }
 
     let tracker_changed = previous.rutracker.host != config.rutracker.host
@@ -153,9 +153,11 @@ pub async fn settings_import(
         .map_err(|e| AppError::msg(format!("это не файл настроек: {e}")))?;
 
     crate::apply_autostart(&app, config.ui.autostart);
-    state
-        .engine
-        .set_rate_limits(config.network.download_limit_kbps, config.network.upload_limit_kbps);
+    {
+        use chrono::Timelike;
+        let (down, up) = config.effective_limits(chrono::Local::now().hour());
+        state.engine.set_rate_limits(down, up);
+    }
 
     *state.config.write() = config.clone();
     state.save_config()?;

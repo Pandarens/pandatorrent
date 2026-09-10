@@ -118,7 +118,7 @@ pub async fn leftover_save(
         .ok_or_else(|| AppError::msg("в раздаче нет файлов"))?;
 
     let from = PathBuf::from(&details.output_folder).join(&top);
-    let target_root = PathBuf::from(state.config.read().download_dir.clone());
+    let target_root = state.config.read().download_dir.clone();
     std::fs::create_dir_all(&target_root)?;
     let to = target_root.join(&top);
 
@@ -127,6 +127,14 @@ pub async fn leftover_save(
             "в папке загрузок уже есть «{top}» — уберите её и повторите"
         )));
     }
+
+    // The session still holds the original .torrent, and it goes away with
+    // `forget` below — so it is taken now. That also spares a round trip to
+    // the tracker, which needs a login this action should not depend on.
+    let bytes = match state.engine.torrent_bytes(&info_hash) {
+        Some(bytes) => bytes,
+        None => state.rutracker.download_torrent(topic_id).await?,
+    };
 
     // Stop managing it before the files move out from under the engine.
     state.engine.forget(&info_hash).await?;
@@ -142,7 +150,6 @@ pub async fn leftover_save(
 
     // Re-add at the new home. librqbit checks what is already there, so the
     // part that was downloaded counts and only the rest is fetched.
-    let bytes = state.rutracker.download_torrent(topic_id).await?;
     let added = state
         .engine
         .add(
