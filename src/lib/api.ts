@@ -58,6 +58,8 @@ export const events = {
   trackerAuth: 'tracker:auth',
   /** The worker window needs the user: a Cloudflare check or a sign-in. */
   trackerAttention: 'tracker:attention',
+  /** The check the user was asked about has been passed. */
+  trackerCleared: 'tracker:cleared',
   /** A torrent arrived from a file association or a magnet link. */
   torrentAdded: 'torrent:added',
   /** A watch-history row changed, e.g. its artwork arrived. */
@@ -96,6 +98,10 @@ export function onTorrentAdded(cb: (name: string) => void): Promise<UnlistenFn> 
 
 export function onTrackerAttention(cb: (message: string) => void): Promise<UnlistenFn> {
   return listen<string>(events.trackerAttention, (e) => cb(e.payload))
+}
+
+export function onTrackerCleared(cb: () => void): Promise<UnlistenFn> {
+  return listen<null>(events.trackerCleared, () => cb())
 }
 
 // ------------------------------------------------------------------ torrents
@@ -140,6 +146,8 @@ export const tracker = {
    * lets a real browser through, so this is the only way in.
    */
   openLogin: () => invoke<void>('rutracker_open_login'),
+  /** Brings the worker window forward as it is, for a pending check. */
+  showWindow: () => invoke<void>('rutracker_show_window'),
   hideLogin: () => invoke<void>('rutracker_hide_login'),
   /** End-to-end check of the browser transport, for the settings screen. */
   selftest: () => invoke<SelfTest>('rutracker_selftest'),

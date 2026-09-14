@@ -2788,3 +2788,13 @@ body:has(.pw) {
   color: var(--accent, #57c26a);
   border-color: var(--accent, #57c26a);
 }
+
+/* The "tracker window is waiting on you" notice. */
+.banner.attention {
+  align-items: center;
+  gap: 12px;
+}
+
+.attention-text {
+  min-width: 0;
+}

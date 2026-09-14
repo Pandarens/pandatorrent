@@ -23,6 +23,7 @@ commands.allow = [
   "rutracker_status",
   "rutracker_verify",
   "rutracker_open_login",
+  "rutracker_show_window",
   "rutracker_hide_login",
   "rutracker_selftest",
   "rutracker_logout",

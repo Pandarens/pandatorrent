@@ -128,6 +128,7 @@ pub fn run() {
             commands::tracker::rutracker_status,
             commands::tracker::rutracker_verify,
             commands::tracker::rutracker_open_login,
+            commands::tracker::rutracker_show_window,
             commands::tracker::rutracker_hide_login,
             commands::tracker::rutracker_selftest,
             commands::tracker::rutracker_logout,

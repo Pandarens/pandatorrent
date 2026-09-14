@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import { Sidebar, type ViewId } from './components/Sidebar'
 import { LeftoverWatches } from './components/LeftoverWatches'
+import { TrackerAttention } from './components/TrackerAttention'
 import { ShutdownCountdown } from './components/ShutdownCountdown'
 import { StatusBar } from './components/StatusBar'
 import { Toasts } from './components/ui'
@@ -90,6 +91,7 @@ function Shell() {
       />
 
       <main className="content">
+        <TrackerAttention />
         <LeftoverWatches />
         {view === 'library' && (
           <LibraryView selectedHash={selectedHash} onSelect={setSelectedHash} />

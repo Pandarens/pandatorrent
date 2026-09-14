@@ -22,6 +22,7 @@ import {
   onTorrentCompleted,
   onTorrentAdded,
   onTrackerAttention,
+  onTrackerCleared,
   onTrackerAuth,
   onUpdateCheckState,
   onUpdatesFound,
@@ -53,6 +54,9 @@ interface Store {
   progress: Record<string, TorrentProgress>
   pendingUpdates: TopicUpdate[]
   trackerStatus: TrackerStatus | null
+  /** Why the tracker window is waiting on the user, while it is. */
+  attention: string | null
+  dismissAttention: () => void
   config: AppConfig | null
   checkingUpdates: boolean
   toasts: Toast[]
@@ -77,6 +81,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [progress, setProgress] = useState<Record<string, TorrentProgress>>({})
   const [pendingUpdates, setPendingUpdates] = useState<TopicUpdate[]>([])
   const [trackerStatus, setTrackerStatus] = useState<TrackerStatus | null>(null)
+  const [attention, setAttention] = useState<string | null>(null)
+  const dismissAttention = useCallback(() => setAttention(null), [])
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [checkingUpdates, setCheckingUpdates] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -176,7 +182,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       onTrackerAuth(() => {
         void refreshTracker()
       }),
-      onTrackerAttention((message) => toast(message, 'warn')),
+      // A toast vanished in seconds and was easy to miss; this stays up
+      // until the check is passed or the user waves it away.
+      onTrackerAttention((message) => setAttention(message)),
+      onTrackerCleared(() => {
+        setAttention(null)
+        void refreshTracker()
+      }),
       // Opened from Explorer or a magnet link while the app was already running.
       onTorrentAdded((name) => {
         toast(`Открыт торрент: ${name}`)
@@ -198,6 +210,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       progress,
       pendingUpdates,
       trackerStatus,
+      attention,
+      dismissAttention,
       config,
       checkingUpdates,
       toasts,
@@ -216,6 +230,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       progress,
       pendingUpdates,
       trackerStatus,
+      attention,
+      dismissAttention,
       config,
       checkingUpdates,
       toasts,

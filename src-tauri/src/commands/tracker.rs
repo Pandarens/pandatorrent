@@ -92,6 +92,13 @@ pub async fn rutracker_verify(state: State<'_, Arc<AppState>>) -> AppResult<Trac
     })
 }
 
+/// Shows the worker window as it is — for a Cloudflare check that is waiting
+/// on a person. Does not navigate anywhere.
+#[tauri::command]
+pub async fn rutracker_show_window(state: State<'_, Arc<AppState>>) -> AppResult<()> {
+    state.rutracker.browser().show()
+}
+
 /// Opens the tracker's login page in the worker window for the user to sign in.
 #[tauri::command]
 pub async fn rutracker_open_login(state: State<'_, Arc<AppState>>) -> AppResult<()> {

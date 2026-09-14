@@ -42,11 +42,20 @@ const JOB_TIMEOUT: Duration = Duration::from_secs(30);
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(180);
 /// If the challenge is still on screen after this, it needs a human click.
 const CHALLENGE_PATIENCE: Duration = Duration::from_secs(12);
+/// How long to wait once the window is on screen and a person is dealing with
+/// the challenge. The old five seconds turned every search into a stream of
+/// "still checking" errors while somebody was in the middle of clicking.
+const HUMAN_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long an auto-passing challenge gets before the window is shown at all,
+/// so a check that clears by itself does not flash a window for a second.
+const AUTO_PASS_GRACE: Duration = Duration::from_secs(3);
 
 /// Events the frontend listens for while the browser transport works.
 pub mod events {
     /// Emitted when the user has to solve a challenge or log in by hand.
     pub const ATTENTION: &str = "tracker:attention";
+    /// Emitted once a challenge the user was asked about has been passed.
+    pub const CLEARED: &str = "tracker:cleared";
     /// Emitted when login state changes.
     pub const AUTH: &str = "tracker:auth";
 }
@@ -114,8 +123,11 @@ const AGENT_SCRIPT: &str = r#"
   function pageState() {
     const title = document.title || '';
     const challenged =
-      /just a moment|checking your browser|attention required/i.test(title) ||
-      !!document.querySelector('#challenge-form, #challenge-running, .cf-turnstile, #cf-please-wait');
+      /just a moment|checking your browser|attention required|verify you are human|подтвердите, что вы человек/i.test(title) ||
+      !!document.querySelector(
+        '#challenge-form, #challenge-running, .cf-turnstile, #cf-please-wait, ' +
+        '#turnstile-wrapper, #cf-chl-widget, .cf-challenge, iframe[src*="challenges.cloudflare.com"]'
+      );
     // Mirrors auth::is_logged_in_html on the Rust side: a logout link, or the
     // guest login block being gone while a user-panel link is present.
     const hasLoginForm = !!document.querySelector('input[name="login_username"]');
@@ -399,7 +411,7 @@ impl TrackerBrowser {
         // quick "still checking" answer instead of a long silent block.
         let interactive = *self.interactive.read();
         let deadline = if interactive {
-            Duration::from_secs(5)
+            HUMAN_TIMEOUT
         } else {
             READY_TIMEOUT
         };
@@ -429,7 +441,7 @@ impl TrackerBrowser {
 
             if started.elapsed() > deadline {
                 return Err(AppError::TrackerUnreachable(if interactive {
-                    "идёт проверка Cloudflare в окне трекера".into()
+                    "Cloudflare всё ещё ждёт подтверждения в окне трекера".into()
                 } else {
                     "трекер не ответил или проверка Cloudflare не пройдена".to_string()
                 }));
@@ -503,26 +515,122 @@ impl TrackerBrowser {
         }
     }
 
+    /// Runs a job, and if Cloudflare answers it with a challenge, puts the
+    /// window in front of the user and tries once more after they clear it.
+    ///
+    /// The parked page passing its check is no guarantee: Cloudflare challenges
+    /// individual requests too, and a `fetch()` that meets one gets a 403 with
+    /// the interstitial as its body. That used to come back as an error telling
+    /// the user to "open the login in the browser" — with no window shown.
+    async fn run_job_past_cloudflare(
+        &self,
+        path_and_query: &str,
+        binary: bool,
+        encoding: Encoding,
+    ) -> AppResult<JobResult> {
+        let first = self.run_job(path_and_query, binary, encoding).await?;
+        if !looks_like_challenge(&first) {
+            return Ok(first);
+        }
+
+        tracing::warn!(path = path_and_query, "Cloudflare перепроверяет запрос — зовём человека");
+        self.confront_challenge(path_and_query).await?;
+
+        let second = self.run_job(path_and_query, binary, encoding).await?;
+        if looks_like_challenge(&second) {
+            return Err(AppError::TrackerUnreachable(
+                "Cloudflare не пропускает запрос — окно трекера открыто, подтвердите проверку и повторите".into(),
+            ));
+        }
+        Ok(second)
+    }
+
+    /// Steers the worker window onto the challenged address and, unless the
+    /// check passes by itself within a moment, shows it for the person to
+    /// confirm. Returns once the page is clear.
+    async fn confront_challenge(&self, path_and_query: &str) -> AppResult<()> {
+        let url = url::Url::parse(&format!(
+            "{}/{}",
+            self.base(),
+            path_and_query.trim_start_matches('/')
+        ))
+        .map_err(|e| AppError::msg(format!("некорректный адрес трекера: {e}")))?;
+
+        let window = match self.window() {
+            Some(w) => {
+                *self.state.write() = PageState::default();
+                window_navigate(&w, url)?;
+                w
+            }
+            None => self.build_window(path_and_query, false)?,
+        };
+        *self.last_used.lock() = Instant::now();
+
+        // A check that clears on its own is not worth a window.
+        let started = Instant::now();
+        while started.elapsed() < AUTO_PASS_GRACE {
+            let cleared = {
+                let state = self.state.read();
+                !state.url.is_empty() && !state.challenged
+            };
+            if cleared {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+
+        *self.interactive.write() = true;
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = self.app.emit(
+            events::ATTENTION,
+            "Cloudflare просит подтвердить, что вы не робот — сделайте это в открывшемся окне",
+        );
+
+        let outcome = self.wait_for_clearance(window.clone()).await;
+        // Whatever happened, the window was ours to open, so it is ours to
+        // take back; a failure leaves it up so the person can still act.
+        if outcome.is_ok() {
+            *self.interactive.write() = false;
+            let _ = window.hide();
+            let _ = self.app.emit(events::CLEARED, ());
+        }
+        outcome.map(|_| ())
+    }
+
+    /// Shows the worker window as it is, for a person to deal with whatever
+    /// is on it. Unlike `open_login`, it does not navigate anywhere.
+    pub fn show(&self) -> AppResult<()> {
+        *self.interactive.write() = true;
+        *self.last_used.lock() = Instant::now();
+        let window = match self.window() {
+            Some(w) => w,
+            None => self.build_window("tracker.php", true)?,
+        };
+        window
+            .show()
+            .map_err(|e| AppError::msg(format!("не удалось показать окно: {e}")))?;
+        let _ = window.set_focus();
+        Ok(())
+    }
+
     /// Fetches a tracker page as text.
     pub async fn get_text(&self, path_and_query: &str) -> AppResult<String> {
-        let r = self.run_job(path_and_query, false, Encoding::Cp1251).await?;
+        let r = self
+            .run_job_past_cloudflare(path_and_query, false, Encoding::Cp1251)
+            .await?;
         if let Some(err) = r.error {
             return Err(AppError::TrackerUnreachable(err));
         }
-        let text = r
-            .text
-            .ok_or_else(|| AppError::Parse("пустой ответ трекера".into()))?;
-        if r.status == 403 && text.contains("__cf_chl") {
-            return Err(AppError::TrackerUnreachable(
-                "Cloudflare снова требует проверку — откройте вход в браузере".into(),
-            ));
-        }
-        Ok(text)
+        r.text
+            .ok_or_else(|| AppError::Parse("пустой ответ трекера".into()))
     }
 
     /// Fetches a UTF-8 resource, such as the JSON API.
     pub async fn get_utf8(&self, path_and_query: &str) -> AppResult<String> {
-        let r = self.run_job(path_and_query, false, Encoding::Utf8).await?;
+        let r = self
+            .run_job_past_cloudflare(path_and_query, false, Encoding::Utf8)
+            .await?;
         if let Some(err) = r.error {
             return Err(AppError::TrackerUnreachable(err));
         }
@@ -532,7 +640,9 @@ impl TrackerBrowser {
 
     /// Fetches a binary resource, such as a `.torrent` file.
     pub async fn get_bytes(&self, path_and_query: &str) -> AppResult<(u16, Vec<u8>)> {
-        let r = self.run_job(path_and_query, true, Encoding::Utf8).await?;
+        let r = self
+            .run_job_past_cloudflare(path_and_query, true, Encoding::Utf8)
+            .await?;
         if let Some(err) = r.error {
             return Err(AppError::TrackerUnreachable(err));
         }
@@ -608,6 +718,60 @@ impl TrackerBrowser {
 
     pub fn is_logged_in(&self) -> bool {
         self.session_known().unwrap_or(false)
+    }
+}
+
+/// Whether a response body is the Cloudflare interstitial rather than the page.
+///
+/// Status alone is not enough — the tracker itself answers 403 for a hidden
+/// forum — and body alone is not enough either, since a topic may quote the
+/// phrase. Both together are unambiguous.
+fn is_cloudflare_challenge(status: u16, body: &str) -> bool {
+    if status != 403 && status != 503 {
+        return false;
+    }
+    ["__cf_chl", "cf-chl", "cf_chl_opt", "challenge-platform", "Just a moment"]
+        .iter()
+        .any(|marker| body.contains(marker))
+}
+
+/// The same question, asked of a job result of either kind.
+fn looks_like_challenge(result: &JobResult) -> bool {
+    if let Some(text) = &result.text {
+        return is_cloudflare_challenge(result.status, text);
+    }
+    // A binary fetch that met the wall carries the interstitial as its bytes.
+    // Only a 403/503 is worth decoding; a real .torrent never is.
+    if (result.status == 403 || result.status == 503) && result.base64.is_some() {
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(result.base64.as_deref().unwrap_or("").as_bytes())
+            .unwrap_or_default();
+        return is_cloudflare_challenge(result.status, &String::from_utf8_lossy(&decoded));
+    }
+    false
+}
+
+#[cfg(test)]
+mod challenge_tests {
+    use super::is_cloudflare_challenge;
+
+    #[test]
+    fn a_403_with_the_challenge_script_is_the_wall() {
+        let body = "<html><script>window._cf_chl_opt={...};</script><div id='challenge-running'></div>";
+        assert!(is_cloudflare_challenge(403, body));
+        assert!(is_cloudflare_challenge(503, "<title>Just a moment...</title>"));
+    }
+
+    #[test]
+    fn a_403_from_the_tracker_itself_is_not() {
+        // A hidden forum answers 403 with an ordinary error page.
+        assert!(!is_cloudflare_challenge(403, "<h1>Доступ запрещён</h1>"));
+    }
+
+    #[test]
+    fn a_topic_quoting_the_phrase_is_not() {
+        // The words alone must not trip it: 200 is a real page.
+        assert!(!is_cloudflare_challenge(200, "Just a moment — cf-chl was mentioned in a post"));
     }
 }
 
