@@ -118,6 +118,8 @@ pub fn run() {
             commands::torrents::torrent_recheck,
             commands::torrents::torrent_set_no_seeding,
             commands::torrents::torrent_set_forced,
+            commands::torrents::torrent_pieces,
+            commands::torrents::torrent_redownload_file,
             commands::torrents::torrent_peers,
             commands::torrents::torrent_create,
             commands::torrents::session_stats,

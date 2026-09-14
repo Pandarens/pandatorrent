@@ -496,3 +496,20 @@ export interface SessionSummary {
   /** Nodes in the DHT routing table — a rough health signal. */
   dhtNodes: number
 }
+
+/** The pieces of one file that are on disk, squashed into buckets. */
+export interface FilePieces {
+  index: number
+  totalPieces: number
+  havePieces: number
+  /** Fill of each bucket, 0–100, left to right. */
+  buckets: number[]
+}
+
+/** Which pieces of a torrent are on disk. */
+export interface PieceMap {
+  totalPieces: number
+  havePieces: number
+  buckets: number[]
+  files: FilePieces[]
+}

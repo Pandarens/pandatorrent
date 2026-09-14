@@ -9,7 +9,9 @@ import { useEffect, useState } from 'react'
 import { player as playerApi, torrents as torrentsApi } from '../lib/api'
 import { formatBytes } from '../lib/format'
 import { useStore } from '../lib/store'
-import type { PeerView, TorrentFileEntry } from '../lib/types'
+import type { PeerView, PieceMap, TorrentFileEntry } from '../lib/types'
+import { ConfirmDialog } from './ConfirmDialog'
+import { PieceStrip } from './PieceStrip'
 import { Spinner } from './ui'
 
 /** Extensions worth offering a play button for. */
@@ -26,6 +28,8 @@ export function TorrentFiles({
   const [selfish, setSelfish] = useState(noSeeding)
   const [files, setFiles] = useState<TorrentFileEntry[] | null>(null)
   const [peers, setPeers] = useState<PeerView[]>([])
+  const [pieces, setPieces] = useState<PieceMap | null>(null)
+  const [redo, setRedo] = useState<TorrentFileEntry | null>(null)
   const [tab, setTab] = useState<'files' | 'peers'>('files')
   const [busy, setBusy] = useState(false)
 
@@ -43,6 +47,27 @@ export function TorrentFiles({
       setPeers(await torrentsApi.peers(infoHash))
     } catch {
       setPeers([])
+    }
+    // The piece map needs a live torrent; a paused one simply has no strip.
+    try {
+      setPieces(await torrentsApi.pieces(infoHash))
+    } catch {
+      setPieces(null)
+    }
+  }
+
+  async function redownload(f: TorrentFileEntry) {
+    setRedo(null)
+    setBusy(true)
+    try {
+      await torrentsApi.redownloadFile(infoHash, f.index)
+      toast(`Качаю заново: ${f.name}`)
+      await refreshAll()
+      await load()
+    } catch (e) {
+      reportError(e, 'Перекачать файл')
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -135,6 +160,19 @@ export function TorrentFiles({
         </span>
       </div>
 
+      {pieces && pieces.totalPieces > 0 && (
+        <div className="pieces-overview">
+          <PieceStrip
+            buckets={pieces.buckets}
+            height={10}
+            title={`Кусков на диске: ${pieces.havePieces} из ${pieces.totalPieces}`}
+          />
+          <span className="files-hint">
+            {pieces.havePieces} / {pieces.totalPieces} кусков
+          </span>
+        </div>
+      )}
+
       {tab === 'peers' &&
         (peers.length === 0 ? (
           <div className="files-hint" style={{ padding: '8px 6px' }}>
@@ -173,14 +211,37 @@ export function TorrentFiles({
               {f.name}
             </span>
 
-            <span className="file-bar" title={`${percent.toFixed(1)}%`}>
-              <span style={{ width: `${percent}%` }} />
-            </span>
+            {(() => {
+              const fp = pieces?.files.find((x) => x.index === f.index)
+              return fp && fp.totalPieces > 0 ? (
+                <span className="file-bar as-strip">
+                  <PieceStrip
+                    buckets={fp.buckets}
+                    height={6}
+                    title={`${fp.havePieces} из ${fp.totalPieces} кусков (${percent.toFixed(1)}%)`}
+                  />
+                </span>
+              ) : (
+                <span className="file-bar" title={`${percent.toFixed(1)}%`}>
+                  <span style={{ width: `${percent}%` }} />
+                </span>
+              )
+            })()}
 
             <span className="file-size">
               {formatBytes(f.downloaded)} / {formatBytes(f.length)}
             </span>
 
+            {f.included && (
+              <button
+                className="btn ghost sm"
+                disabled={busy}
+                title="Удалить этот файл и скачать заново"
+                onClick={() => setRedo(f)}
+              >
+                ⟲
+              </button>
+            )}
             {VIDEO.test(f.name) && (
               <button
                 className="btn ghost sm"
@@ -193,6 +254,27 @@ export function TorrentFiles({
           </div>
           )
         })}
+
+      {redo && (
+        <ConfirmDialog
+          title="Перекачать файл"
+          icon="⟲"
+          message={
+            <>
+              <p style={{ marginTop: 0 }}>
+                <strong>{redo.name}</strong>
+              </p>
+              <p style={{ color: 'var(--text-dim)', marginBottom: 0 }}>
+                Файл будет удалён с диска и скачан заново. Раздача при этом
+                перепроверится целиком — на большой это займёт время.
+              </p>
+            </>
+          }
+          choices={[{ label: 'Удалить и скачать заново', value: true, kind: 'danger' }]}
+          onPick={() => void redownload(redo)}
+          onCancel={() => setRedo(null)}
+        />
+      )}
     </div>
   )
 }

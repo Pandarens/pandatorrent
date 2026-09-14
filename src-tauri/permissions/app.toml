@@ -73,6 +73,8 @@ commands.allow = [
   "torrent_recheck",
   "torrent_set_no_seeding",
   "torrent_set_forced",
+  "torrent_pieces",
+  "torrent_redownload_file",
   "torrent_peers",
   "torrent_create",
   "session_stats",

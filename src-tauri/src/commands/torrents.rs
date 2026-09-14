@@ -153,6 +153,35 @@ pub async fn torrent_set_forced(
     Ok(())
 }
 
+/// Which pieces are on disk, for the torrent and each file.
+#[tauri::command]
+pub async fn torrent_pieces(
+    state: State<'_, Arc<AppState>>,
+    info_hash: String,
+) -> AppResult<crate::engine::PieceMap> {
+    state.engine.pieces(&info_hash)
+}
+
+/// Throws one file away and downloads it again.
+#[tauri::command]
+pub async fn torrent_redownload_file(
+    state: State<'_, Arc<AppState>>,
+    info_hash: String,
+    file_index: usize,
+) -> AppResult<AddedTorrent> {
+    // Pulling a file out from under the player would end the film mid-frame.
+    let playing = state
+        .now_playing
+        .lock()
+        .as_ref()
+        .map(|n| n.info_hash.eq_ignore_ascii_case(&info_hash))
+        .unwrap_or(false);
+    if playing {
+        return Err(AppError::msg("эту раздачу сейчас смотрят — закройте плеер и повторите"));
+    }
+    state.engine.redownload_file(&info_hash, file_index).await
+}
+
 /// Who we are exchanging pieces with, for one torrent.
 #[tauri::command]
 pub async fn torrent_peers(

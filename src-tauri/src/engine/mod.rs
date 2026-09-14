@@ -56,6 +56,55 @@ pub struct TorrentFileEntry {
     pub downloaded: u64,
 }
 
+/// How many buckets a piece map is squashed into for display.
+///
+/// A torrent can have tens of thousands of pieces; a strip a few hundred
+/// pixels wide cannot show more than this anyway, and sending every bit for
+/// every open row twice a second would be waste.
+const PIECE_BUCKETS: usize = 240;
+
+/// Which pieces of a torrent are on disk, squashed into buckets.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PieceMap {
+    pub total_pieces: u32,
+    pub have_pieces: u32,
+    /// Fill of each bucket, 0–100, left to right across the torrent.
+    pub buckets: Vec<u8>,
+    pub files: Vec<FilePieces>,
+}
+
+/// The same, for the pieces belonging to one file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePieces {
+    pub index: usize,
+    pub total_pieces: u32,
+    pub have_pieces: u32,
+    pub buckets: Vec<u8>,
+}
+
+/// Squashes a run of pieces into display buckets.
+///
+/// Returns how many of them are present, and the fill of each bucket.
+fn bucketize(range: std::ops::Range<usize>, is_have: &dyn Fn(usize) -> bool) -> (u32, Vec<u8>) {
+    let n = range.len();
+    if n == 0 {
+        return (0, Vec::new());
+    }
+    let buckets = n.min(PIECE_BUCKETS);
+    let mut fills = Vec::with_capacity(buckets);
+    let mut have_total = 0u32;
+    for b in 0..buckets {
+        let from = range.start + b * n / buckets;
+        let to = range.start + (b + 1) * n / buckets;
+        let have = (from..to).filter(|&i| is_have(i)).count();
+        have_total += have as u32;
+        fills.push((have * 100 / (to - from).max(1)) as u8);
+    }
+    (have_total, fills)
+}
+
 /// One peer we are connected to.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -315,12 +364,54 @@ impl Engine {
         Some(metadata.torrent_bytes.to_vec())
     }
 
-    /// Re-hashes a torrent's files against the piece list.
+    /// Which pieces are on disk, for the torrent and for each of its files.
     ///
-    /// Implemented as forget-and-re-add because librqbit offers no re-check
-    /// action. The files are untouched throughout; only the bookkeeping is
-    /// rebuilt, which is the point.
-    pub async fn recheck(&self, info_hash: &str) -> AppResult<AddedTorrent> {
+    /// The picture every torrent client shows: not just "how much" but
+    /// "which parts" — where the gaps are, and whether the film's first half
+    /// is here yet.
+    pub fn pieces(&self, info_hash: &str) -> AppResult<PieceMap> {
+        let idx = parse_id(info_hash)?;
+        let (have, total) = self
+            .api
+            .api_dump_haves(idx)
+            .map_err(|e| AppError::Other(e.to_string()))?;
+        let total = total as usize;
+        let is_have = |i: usize| have.get(i).map(|b| *b).unwrap_or(false);
+
+        let (have_pieces, buckets) = bucketize(0..total, &is_have);
+
+        let files = self
+            .session
+            .get(idx)
+            .and_then(|h| h.metadata.load_full())
+            .map(|meta| {
+                meta.file_infos
+                    .iter()
+                    .enumerate()
+                    .map(|(index, info)| {
+                        let range = info.piece_range.start as usize..info.piece_range.end as usize;
+                        let (have_pieces, buckets) = bucketize(range.clone(), &is_have);
+                        FilePieces {
+                            index,
+                            total_pieces: range.len() as u32,
+                            have_pieces,
+                            buckets,
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(PieceMap {
+            total_pieces: total as u32,
+            have_pieces,
+            buckets,
+            files,
+        })
+    }
+
+    /// Everything needed to put a torrent back after forgetting it.
+    fn readd_plan(&self, info_hash: &str) -> AppResult<(Vec<u8>, TorrentDetails, Option<Vec<usize>>)> {
         let bytes = self
             .torrent_bytes(info_hash)
             .ok_or_else(|| AppError::msg("торрент ещё не готов к проверке"))?;
@@ -335,18 +426,94 @@ impl Engine {
             .map(|f| f.index)
             .collect();
         let only_files = (only_files.len() < details.files.len()).then_some(only_files);
+        Ok((bytes, details, only_files))
+    }
 
-        self.forget(info_hash).await?;
+    async fn readd(
+        &self,
+        bytes: Vec<u8>,
+        output_folder: String,
+        only_files: Option<Vec<usize>>,
+    ) -> AppResult<AddedTorrent> {
         self.add(
             AddSource::Bytes(bytes),
             AddOptions {
-                output_folder: Some(details.output_folder),
+                output_folder: Some(output_folder),
                 only_files,
                 overwrite: true,
                 paused: false,
             },
         )
         .await
+    }
+
+    /// Re-hashes a torrent's files against the piece list.
+    ///
+    /// Implemented as forget-and-re-add because librqbit offers no re-check
+    /// action. The files are untouched throughout; only the bookkeeping is
+    /// rebuilt, which is the point.
+    pub async fn recheck(&self, info_hash: &str) -> AppResult<AddedTorrent> {
+        let (bytes, details, only_files) = self.readd_plan(info_hash)?;
+        self.forget(info_hash).await?;
+        self.readd(bytes, details.output_folder, only_files).await
+    }
+
+    /// Throws one file away and fetches it again.
+    ///
+    /// The same forget-and-re-add as a re-check, with the file deleted in
+    /// between: the re-hash then finds its pieces missing and the download
+    /// fills them back in. Deleting happens only after the engine has let go
+    /// of the file — Windows will not remove a file something holds open.
+    pub async fn redownload_file(
+        &self,
+        info_hash: &str,
+        file_index: usize,
+    ) -> AppResult<AddedTorrent> {
+        let (bytes, details, only_files) = self.readd_plan(info_hash)?;
+        let file = details
+            .files
+            .iter()
+            .find(|f| f.index == file_index)
+            .ok_or_else(|| AppError::msg("в раздаче нет такого файла"))?;
+        if !file.included {
+            return Err(AppError::msg("этот файл исключён из загрузки"));
+        }
+        let mut path = std::path::PathBuf::from(&details.output_folder);
+        for part in &file.components {
+            path.push(part);
+        }
+
+        self.forget(info_hash).await?;
+
+        // The handle is released asynchronously; a few short retries cover it.
+        let mut removed = Ok(());
+        for attempt in 0..10 {
+            removed = match std::fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            };
+            if removed.is_ok() {
+                break;
+            }
+            if attempt < 9 {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+
+        // Whatever happened to the file, the torrent goes back: losing it
+        // over a locked file would be far worse than a failed re-download.
+        let added = self.readd(bytes, details.output_folder, only_files).await?;
+        match removed {
+            Ok(()) => {
+                tracing::info!(%info_hash, file = %file.name, "файл удалён и качается заново");
+                Ok(added)
+            }
+            Err(e) => Err(AppError::msg(format!(
+                "не удалось удалить «{}»: {e}. Раздача проверена заново, но файл остался",
+                file.name
+            ))),
+        }
     }
 
     pub fn details(&self, info_hash: &str) -> AppResult<TorrentDetails> {

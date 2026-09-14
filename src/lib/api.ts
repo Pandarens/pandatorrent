@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import type {
   PeerView,
+  PieceMap,
   SessionSummary,
   Leftover,
   AddedTorrent,
@@ -123,6 +124,10 @@ export const torrents = {
   setForced: (infoHash: string, on: boolean) =>
     invoke<void>('torrent_set_forced', { infoHash, on }),
   peers: (infoHash: string) => invoke<PeerView[]>('torrent_peers', { infoHash }),
+  pieces: (infoHash: string) => invoke<PieceMap>('torrent_pieces', { infoHash }),
+  /** Throws one file away and downloads it again. */
+  redownloadFile: (infoHash: string, fileIndex: number) =>
+    invoke<AddedTorrent>('torrent_redownload_file', { infoHash, fileIndex }),
   sessionStats: () => invoke<SessionSummary>('session_stats'),
   create: (source: string, saveTo: string, name: string | null, trackers: string[]) =>
     invoke<void>('torrent_create', { source, saveTo, name, trackers }),

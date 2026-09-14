@@ -2798,3 +2798,31 @@ body:has(.pw) {
 .attention-text {
   min-width: 0;
 }
+
+/* The piece map strips. */
+.piece-strip {
+  display: block;
+  width: 100%;
+  border-radius: 3px;
+}
+
+.pieces-overview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 10px;
+}
+
+.pieces-overview .piece-strip {
+  flex: 1;
+}
+
+.pieces-overview .files-hint {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-bar.as-strip {
+  background: transparent;
+  height: 6px;
+}
