@@ -192,6 +192,9 @@ pub struct TrackerBrowser {
     next_id: AtomicU64,
     /// Serialises window creation so two concurrent requests build one window.
     creating: tokio::sync::Mutex<()>,
+    /// Serialises "ask the human": two requests hitting the wall at once used
+    /// to steer the same window to two different addresses in turn.
+    confronting: tokio::sync::Mutex<()>,
     /// Lets window-event callbacks, which must be `'static`, reach us back.
     self_ref: RwLock<Weak<TrackerBrowser>>,
     /// Last *known* answer to "is the user signed in".
@@ -214,6 +217,7 @@ impl TrackerBrowser {
             last_used: Mutex::new(Instant::now()),
             next_id: AtomicU64::new(1),
             creating: tokio::sync::Mutex::new(()),
+            confronting: tokio::sync::Mutex::new(()),
             self_ref: RwLock::new(Weak::new()),
             session: RwLock::new(None),
         });
@@ -537,6 +541,9 @@ impl TrackerBrowser {
         self.confront_challenge(path_and_query).await?;
 
         let second = self.run_job(path_and_query, binary, encoding).await?;
+        if !looks_like_challenge(&second) {
+            tracing::info!(path = path_and_query, "запрос повторён после проверки — прошёл");
+        }
         if looks_like_challenge(&second) {
             return Err(AppError::TrackerUnreachable(
                 "Cloudflare не пропускает запрос — окно трекера открыто, подтвердите проверку и повторите".into(),
@@ -549,6 +556,17 @@ impl TrackerBrowser {
     /// check passes by itself within a moment, shows it for the person to
     /// confirm. Returns once the page is clear.
     async fn confront_challenge(&self, path_and_query: &str) -> AppResult<()> {
+        // Whoever got here second waits for the first to finish — and by then
+        // the clearance cookie is usually set, so a fresh trip is unnecessary.
+        let _turn = self.confronting.lock().await;
+        {
+            let state = self.state.read();
+            if !state.url.is_empty() && !state.challenged && !*self.interactive.read() {
+                tracing::info!("проверка уже пройдена соседним запросом");
+                return Ok(());
+            }
+        }
+
         let url = url::Url::parse(&format!(
             "{}/{}",
             self.base(),
@@ -574,11 +592,13 @@ impl TrackerBrowser {
                 !state.url.is_empty() && !state.challenged
             };
             if cleared {
+                tracing::info!("проверка Cloudflare прошла сама, окно не понадобилось");
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
+        tracing::info!("показываем окно трекера — нужна рука человека");
         *self.interactive.write() = true;
         let _ = window.show();
         let _ = window.set_focus();
@@ -590,10 +610,14 @@ impl TrackerBrowser {
         let outcome = self.wait_for_clearance(window.clone()).await;
         // Whatever happened, the window was ours to open, so it is ours to
         // take back; a failure leaves it up so the person can still act.
-        if outcome.is_ok() {
-            *self.interactive.write() = false;
-            let _ = window.hide();
-            let _ = self.app.emit(events::CLEARED, ());
+        match &outcome {
+            Ok(_) => {
+                tracing::info!("человек подтвердил проверку, окно убрано");
+                *self.interactive.write() = false;
+                let _ = window.hide();
+                let _ = self.app.emit(events::CLEARED, ());
+            }
+            Err(e) => tracing::warn!("проверка так и не пройдена: {e}"),
         }
         outcome.map(|_| ())
     }
