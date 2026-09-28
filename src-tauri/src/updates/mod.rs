@@ -331,6 +331,8 @@ pub async fn apply_update(
                 // Unchanged pieces are re-used instead of re-downloaded, which
                 // is the whole point of updating in place.
                 overwrite: true,
+                // The old release's folder is the new one's, as it is.
+                exact_folder: true,
             },
         )
         .await?;

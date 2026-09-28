@@ -237,8 +237,13 @@ impl Db {
     /// deliberately stopped, which is the one thing it must never do.
     pub fn set_user_paused(&self, info_hash: &str, paused: bool) -> AppResult<()> {
         let conn = self.conn.lock();
+        // Pausing by hand also withdraws an earlier "force": the two contradict,
+        // and a forced download that somebody then paused was being restarted
+        // by the queue every second. The smoke test caught this.
         conn.execute(
-            "UPDATE torrents SET user_paused = ?2 WHERE info_hash = ?1",
+            "UPDATE torrents SET user_paused = ?2,
+                    forced = CASE WHEN ?2 = 1 THEN 0 ELSE forced END
+             WHERE info_hash = ?1",
             params![info_hash, paused as i64],
         )?;
         Ok(())

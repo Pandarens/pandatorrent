@@ -3,8 +3,10 @@
 // Everything the UI does goes through this file, so command names and argument
 // shapes live in exactly one place.
 
-import { invoke } from '@tauri-apps/api/core'
+import { invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+
+import * as activity from './activity'
 import type {
   PeerView,
   PieceMap,
@@ -40,6 +42,19 @@ import type {
 } from './types'
 
 /** Narrows an unknown rejection into the error shape the backend sends. */
+/**
+ * Every command goes out through here, so the status line can say what the
+ * application is busy with. Nothing else about the call changes.
+ */
+async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  const done = activity.begin(command)
+  try {
+    return await tauriInvoke<T>(command, args)
+  } finally {
+    done()
+  }
+}
+
 export function asAppError(e: unknown): AppError {
   if (e && typeof e === 'object' && 'kind' in e && 'message' in e) {
     return e as AppError

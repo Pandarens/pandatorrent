@@ -161,6 +161,54 @@ pub struct AddOptions {
     /// the rest is fetched. Adding with this off meant a release already on
     /// disk started again from nothing.
     pub overwrite: bool,
+    /// Use `output_folder` exactly as given, rather than as a root under which
+    /// the release gets a folder of its own. For putting a torrent back where
+    /// it already is: a re-check, a re-download, an in-place update.
+    pub exact_folder: bool,
+}
+
+/// The folder a release gets under a root: its name for a multi-file torrent,
+/// none for a single file — the same rule librqbit applies to its default
+/// folder, and applies *only* there.
+///
+/// Passing a folder explicitly switched that rule off, so every multi-file
+/// release was landing loose in the download folder, its episodes mixed in
+/// with everything else. The smoke test caught it: a torrent added on top of
+/// the files it was made from found none of them, because it was looking one
+/// level up.
+fn release_subfolder(torrent: &[u8]) -> Option<String> {
+    let meta = librqbit::torrent_from_bytes(torrent).ok()?;
+    if meta.info.data.files.is_none() {
+        return None;
+    }
+    let raw_name = meta
+        .info
+        .data
+        .name
+        .as_ref()
+        .map(|b| String::from_utf8_lossy(b.as_ref()).to_string())
+        .unwrap_or_default();
+    let name = folder_name_for(&raw_name);
+    (!name.is_empty()).then_some(name)
+}
+
+/// A torrent name made safe as a Windows folder name.
+fn folder_name_for(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || (c as u32) < 32 {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    let cleaned = cleaned.trim().trim_end_matches(['.', ' ']).to_string();
+    if cleaned == "." || cleaned == ".." {
+        return String::new();
+    }
+    cleaned
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,6 +490,8 @@ impl Engine {
                 only_files,
                 overwrite: true,
                 paused: false,
+                // It is going back where it was; do not nest it again.
+                exact_folder: true,
             },
         )
         .await
@@ -548,6 +598,30 @@ impl Engine {
     }
 
     pub async fn add(&self, source: AddSource, opts: AddOptions) -> AppResult<AddedTorrent> {
+        // The name is needed before the engine has parsed anything, so it is
+        // read here. A magnet has no name until its metadata arrives; under
+        // a custom root that one case lands flat, and the app never does it.
+        let torrent_bytes: Option<Vec<u8>> = match &source {
+            AddSource::Bytes(b) => Some(b.clone()),
+            AddSource::Url(_) => None,
+        };
+        let output_folder = match (opts.output_folder, opts.exact_folder) {
+            // No folder given: librqbit puts the release under its default
+            // root, in a folder of its own.
+            (None, _) => None,
+            (Some(folder), true) => Some(folder),
+            (Some(root), false) => {
+                let sub = torrent_bytes.as_deref().and_then(release_subfolder);
+                Some(match sub {
+                    Some(name) => std::path::Path::new(&root)
+                        .join(name)
+                        .to_string_lossy()
+                        .to_string(),
+                    None => root,
+                })
+            }
+        };
+
         let add = match source {
             AddSource::Url(u) => AddTorrent::from_url(u),
             AddSource::Bytes(b) => AddTorrent::from_bytes(b),
@@ -555,7 +629,7 @@ impl Engine {
         let add_opts = AddTorrentOptions {
             paused: opts.paused,
             overwrite: opts.overwrite,
-            output_folder: opts.output_folder,
+            output_folder,
             only_files: opts.only_files,
             ..Default::default()
         };
@@ -770,4 +844,24 @@ fn to_progress(
 
 fn mib_per_sec_to_bps(mib: f64) -> u64 {
     (mib * 1024.0 * 1024.0).max(0.0) as u64
+}
+
+#[cfg(test)]
+mod folder_tests {
+    use super::folder_name_for;
+
+    #[test]
+    fn a_release_name_becomes_a_folder_windows_accepts() {
+        assert_eq!(folder_name_for("Film (2024) WEB-DL"), "Film (2024) WEB-DL");
+        assert_eq!(folder_name_for("Кто: он? / она*"), "Кто_ он_ _ она_");
+        // Trailing dots and spaces are silently dropped by Windows, which
+        // would make the folder impossible to find by its recorded name.
+        assert_eq!(folder_name_for("Series... "), "Series");
+    }
+
+    #[test]
+    fn nothing_usable_means_no_folder() {
+        assert_eq!(folder_name_for(".."), "");
+        assert_eq!(folder_name_for("   "), "");
+    }
 }

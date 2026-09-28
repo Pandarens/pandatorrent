@@ -111,21 +111,47 @@ pub async fn leftover_save(
         .ok_or_else(|| AppError::msg("не знаем, с какой раздачи это скачано"))?;
 
     let details = state.engine.details(&info_hash)?;
-    let top = details
-        .files
-        .first()
-        .and_then(|f| f.components.first().cloned())
-        .ok_or_else(|| AppError::msg("в раздаче нет файлов"))?;
+    if details.files.is_empty() {
+        return Err(AppError::msg("в раздаче нет файлов"));
+    }
 
-    let from = PathBuf::from(&details.output_folder).join(&top);
+    let cache = state.stream_cache_dir();
+    let source_root = PathBuf::from(&details.output_folder);
     let target_root = state.config.read().download_dir.clone();
     std::fs::create_dir_all(&target_root)?;
-    let to = target_root.join(&top);
 
-    if to.exists() {
-        return Err(AppError::msg(format!(
-            "в папке загрузок уже есть «{top}» — уберите её и повторите"
-        )));
+    // A release added lately has its own folder under the cache and moves as
+    // one piece; a viewing from before releases had folders lies loose in the
+    // cache root and moves file by file.
+    let nested = source_root != cache && source_root.starts_with(&cache);
+    let (moves, final_folder): (Vec<(PathBuf, PathBuf)>, PathBuf) = if nested {
+        let name = source_root
+            .file_name()
+            .map(|n| n.to_os_string())
+            .unwrap_or_default();
+        let to = target_root.join(name);
+        (vec![(source_root.clone(), to.clone())], to)
+    } else {
+        let mut list = Vec::new();
+        for f in &details.files {
+            let mut from = source_root.clone();
+            let mut to = target_root.clone();
+            for part in &f.components {
+                from.push(part);
+                to.push(part);
+            }
+            list.push((from, to));
+        }
+        (list, target_root.clone())
+    };
+
+    for (_, to) in &moves {
+        if to.exists() {
+            return Err(AppError::msg(format!(
+                "в папке загрузок уже есть «{}» — уберите и повторите",
+                to.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+            )));
+        }
     }
 
     // The session still holds the original .torrent, and it goes away with
@@ -141,12 +167,31 @@ pub async fn leftover_save(
     let _ = state.db.delete_torrent(&info_hash);
     *state.temp_watch.lock() = None;
 
-    std::fs::rename(&from, &to).map_err(|e| {
-        AppError::msg(format!(
-            "не удалось перенести файлы в папку загрузок: {e}. Они остались в {}",
-            from.display()
-        ))
-    })?;
+    for (from, to) in &moves {
+        if let Some(parent) = to.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = std::fs::rename(from, to) {
+            // Put the torrent back where it was, so a locked file does not
+            // cost the viewer the whole release.
+            let _ = state
+                .engine
+                .add(
+                    AddSource::Bytes(bytes.clone()),
+                    AddOptions {
+                        output_folder: Some(details.output_folder.clone()),
+                        overwrite: true,
+                        exact_folder: true,
+                        ..Default::default()
+                    },
+                )
+                .await;
+            return Err(AppError::msg(format!(
+                "не удалось перенести «{}»: {e}. Просмотр оставлен где был",
+                from.display()
+            )));
+        }
+    }
 
     // Re-add at the new home. librqbit checks what is already there, so the
     // part that was downloaded counts and only the rest is fetched.
@@ -155,8 +200,9 @@ pub async fn leftover_save(
         .add(
             AddSource::Bytes(bytes),
             AddOptions {
-                output_folder: Some(target_root.to_string_lossy().to_string()),
+                output_folder: Some(final_folder.to_string_lossy().to_string()),
                 overwrite: true,
+                exact_folder: true,
                 ..Default::default()
             },
         )
@@ -172,8 +218,8 @@ pub async fn leftover_save(
         None,
     )?;
 
-    tracing::info!(%top, "просмотр сохранён в загрузки");
-    Ok(to.to_string_lossy().to_string())
+    tracing::info!(folder = %final_folder.display(), "просмотр сохранён в загрузки");
+    Ok(final_folder.to_string_lossy().to_string())
 }
 
 /// One leftover, as the cache accounting sees it.

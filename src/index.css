@@ -2826,3 +2826,17 @@ body:has(.pw) {
   background: transparent;
   height: 6px;
 }
+
+/* "What the application is doing right now", in the status strip. */
+.status-activity {
+  color: var(--accent, #57c26a);
+}
+
+.status-spin {
+  display: inline-block;
+  animation: spin 1.1s linear infinite;
+}
+
+.status-warn {
+  color: #f0b13b;
+}

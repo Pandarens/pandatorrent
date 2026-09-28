@@ -313,19 +313,47 @@ fn tidy_stream_cache(db: &Db, engine: &Arc<Engine>, cache: &std::path::Path) {
         .filter(|r| std::path::Path::new(&r.output_folder).starts_with(cache))
     {
         let details = engine.details(&row.info_hash).ok();
-        let folders: Vec<String> = details
+        let root = std::path::Path::new(&row.output_folder);
+
+        // Files are wherever the engine says they are, relative to the
+        // torrent's own folder — which is the release's folder under the
+        // cache for anything added lately, and the cache root itself for a
+        // viewing from before releases got folders of their own.
+        let on_disk = details
             .as_ref()
             .map(|d| {
-                d.files
-                    .iter()
-                    .filter_map(|f| f.components.first().cloned())
-                    .collect()
+                d.files.iter().any(|f| {
+                    let mut path = root.to_path_buf();
+                    for part in &f.components {
+                        path.push(part);
+                    }
+                    path.exists()
+                })
             })
-            .unwrap_or_default();
+            .unwrap_or(false);
 
-        let on_disk = folders.iter().any(|name| cache.join(name).exists());
+        // What in the cache root belongs to this torrent: its folder, or, for
+        // the old flat layout, its files' top-level names.
+        let owned: Vec<String> = match root
+            .strip_prefix(cache)
+            .ok()
+            .and_then(|rel| rel.components().next())
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+        {
+            Some(first) if !first.is_empty() => vec![first],
+            _ => details
+                .as_ref()
+                .map(|d| {
+                    d.files
+                        .iter()
+                        .filter_map(|f| f.components.first().cloned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        };
+
         if on_disk {
-            keep.extend(folders);
+            keep.extend(owned);
             tracing::info!(name = %row.name, "просмотр с прошлого раза ждёт решения");
             continue;
         }

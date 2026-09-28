@@ -12,7 +12,11 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "typecheck": "tsc -b --noEmit",
-    "fetch:mpv": "node scripts/fetch-mpv.mjs"
+    "fetch:mpv": "node scripts/fetch-mpv.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:core": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "check": "npm run typecheck && npm run test && npm run test:core"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
@@ -32,7 +36,8 @@
     "@vitejs/plugin-react": "^6.1.0",
     "oxlint": "^1.79.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.2"
   },
   "description": "Быстрый торрент-клиент с библиотекой в стиле Steam и интеграцией RuTracker"
 }

@@ -1,0 +1,44 @@
+name: CI
+
+# Runs on every push and pull request. A release tag goes through release.yml;
+# this is what has to be green before one is worth cutting.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and unit-test the interface
+        run: |
+          npm run typecheck
+          npm run test
+
+      # The Rust build embeds the built interface, so it has to exist first.
+      - name: Build the interface
+        run: npm run build
+
+      # Unit tests of every decision plus the end-to-end smoke test: a real
+      # engine over real files, the stream server, the database.
+      - name: Test the core
+        run: cargo test --manifest-path src-tauri/Cargo.toml

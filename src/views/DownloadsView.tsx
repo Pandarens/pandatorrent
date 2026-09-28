@@ -5,6 +5,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 
 import { library as libraryApi, torrents as torrentsApi, tracker } from '../lib/api'
 import { formatBytes, formatEta, formatSpeed, stateLabel } from '../lib/format'
+import { SORT_LABELS, compareRows, type SortKey } from '../lib/sort'
 import { useStore } from '../lib/store'
 import type { TorrentProgress, TorrentView } from '../lib/types'
 import { Empty, Modal, ProgressBar } from '../components/ui'
@@ -13,15 +14,6 @@ import { TorrentFiles } from '../components/TorrentFiles'
 import { CreateTorrentModal } from '../components/CreateTorrentModal'
 
 type Filter = 'all' | 'active' | 'done'
-type SortKey = 'added' | 'name' | 'size' | 'progress' | 'speed'
-
-const SORT_LABELS: Record<SortKey, string> = {
-  added: 'По добавлению',
-  name: 'По названию',
-  size: 'По размеру',
-  progress: 'По прогрессу',
-  speed: 'По скорости',
-}
 
 /**
  * Asks the tracker API whether this info hash belongs to a known topic, so a
@@ -64,31 +56,7 @@ export function DownloadsView({
         const needle = search.trim().toLowerCase()
         return needle === '' || t.name.toLowerCase().includes(needle)
       })
-      .sort((a, b) => {
-        const size = (r: typeof a) => r.p?.totalBytes || r.t.totalBytes
-        const share = (r: typeof a) => {
-          const total = size(r)
-          return total > 0 ? (r.p?.progressBytes ?? 0) / total : 0
-        }
-        let by = 0
-        switch (sort) {
-          case 'name':
-            by = a.t.name.localeCompare(b.t.name, 'ru')
-            break
-          case 'size':
-            by = size(a) - size(b)
-            break
-          case 'progress':
-            by = share(a) - share(b)
-            break
-          case 'speed':
-            by = (a.p?.downloadSpeedBps ?? 0) - (b.p?.downloadSpeedBps ?? 0)
-            break
-          default:
-            by = a.t.addedAt - b.t.addedAt
-        }
-        return descending ? -by : by
-      })
+      .sort(compareRows(sort, descending))
   }, [torrents, progress, filter, search, sort, descending])
 
   async function addFromFile() {
