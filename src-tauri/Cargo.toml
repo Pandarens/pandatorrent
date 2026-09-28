@@ -1,6 +1,6 @@
 [package]
 name = "panda-torrent"
-version = "0.3.2"
+version = "0.3.3"
 description = "Panda Torrent - fast torrent client with tracker integration"
 authors = ["you"]
 license = ""
@@ -72,3 +72,8 @@ opt-level = 1
 # at opt-level 1 and the UI feels broken while a torrent is being verified.
 [profile.dev.package."*"]
 opt-level = 3
+
+# librqbit-dht с одной правкой для Windows: сброс UDP больше не убивает DHT.
+# Подробности — в vendor/librqbit-dht/PANDA-PATCH.md.
+[patch.crates-io]
+librqbit-dht = { path = "vendor/librqbit-dht" }

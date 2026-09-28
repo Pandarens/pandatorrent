@@ -195,6 +195,11 @@ pub struct TrackerBrowser {
     /// Serialises "ask the human": two requests hitting the wall at once used
     /// to steer the same window to two different addresses in turn.
     confronting: tokio::sync::Mutex<()>,
+    /// Bumped every time a challenge is actually cleared. A request that was
+    /// waiting its turn skips the confrontation only if this moved while it
+    /// waited — not because the parked page happens to look clean, which it
+    /// always does when Cloudflare is challenging requests, not pages.
+    clearances: AtomicU64,
     /// Lets window-event callbacks, which must be `'static`, reach us back.
     self_ref: RwLock<Weak<TrackerBrowser>>,
     /// Last *known* answer to "is the user signed in".
@@ -218,6 +223,7 @@ impl TrackerBrowser {
             next_id: AtomicU64::new(1),
             creating: tokio::sync::Mutex::new(()),
             confronting: tokio::sync::Mutex::new(()),
+            clearances: AtomicU64::new(0),
             self_ref: RwLock::new(Weak::new()),
             session: RwLock::new(None),
         });
@@ -543,6 +549,8 @@ impl TrackerBrowser {
         let second = self.run_job(path_and_query, binary, encoding).await?;
         if !looks_like_challenge(&second) {
             tracing::info!(path = path_and_query, "запрос повторён после проверки — прошёл");
+        } else {
+            tracing::warn!(path = path_and_query, "запрос повторён после проверки — снова заглушка");
         }
         if looks_like_challenge(&second) {
             return Err(AppError::TrackerUnreachable(
@@ -556,15 +564,16 @@ impl TrackerBrowser {
     /// check passes by itself within a moment, shows it for the person to
     /// confirm. Returns once the page is clear.
     async fn confront_challenge(&self, path_and_query: &str) -> AppResult<()> {
-        // Whoever got here second waits for the first to finish — and by then
-        // the clearance cookie is usually set, so a fresh trip is unnecessary.
+        // Whoever got here second waits for the first to finish — and if the
+        // first actually got the clearance cookie meanwhile, a fresh trip is
+        // unnecessary. Judged by the counter, not by the parked page: that
+        // page looks clean the whole time when it is requests being
+        // challenged, and trusting it meant nobody confronted anything.
+        let seen = self.clearances.load(Ordering::Relaxed);
         let _turn = self.confronting.lock().await;
-        {
-            let state = self.state.read();
-            if !state.url.is_empty() && !state.challenged && !*self.interactive.read() {
-                tracing::info!("проверка уже пройдена соседним запросом");
-                return Ok(());
-            }
+        if self.clearances.load(Ordering::Relaxed) != seen {
+            tracing::info!("проверка уже пройдена соседним запросом");
+            return Ok(());
         }
 
         let url = url::Url::parse(&format!(
@@ -593,6 +602,7 @@ impl TrackerBrowser {
             };
             if cleared {
                 tracing::info!("проверка Cloudflare прошла сама, окно не понадобилось");
+                self.clearances.fetch_add(1, Ordering::Relaxed);
                 return Ok(());
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
@@ -613,6 +623,7 @@ impl TrackerBrowser {
         match &outcome {
             Ok(_) => {
                 tracing::info!("человек подтвердил проверку, окно убрано");
+                self.clearances.fetch_add(1, Ordering::Relaxed);
                 *self.interactive.write() = false;
                 let _ = window.hide();
                 let _ = self.app.emit(events::CLEARED, ());
