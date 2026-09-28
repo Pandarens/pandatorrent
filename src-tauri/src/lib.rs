@@ -95,6 +95,9 @@ pub fn run() {
             if window.label() != "main" {
                 return;
             }
+            if matches!(event, WindowEvent::Destroyed) {
+                tracing::info!("главное окно уничтожено");
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 let minimize = window
                     .app_handle()
@@ -191,10 +194,17 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
+        .run(|app, event| match event {
+            // A quiet exit used to leave nothing in the log at all — the
+            // process was simply gone. Now the reason is written down first.
+            tauri::RunEvent::ExitRequested { code, .. } => {
+                tracing::info!(?code, "запрошен выход из приложения");
+            }
+            tauri::RunEvent::Exit => {
+                tracing::info!("приложение завершается");
                 release_temp_watch(app);
             }
+            _ => {}
         });
 }
 
